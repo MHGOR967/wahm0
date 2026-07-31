@@ -180,7 +180,7 @@ def api():
                 return {"status": "error", "message": f"كلمة المرور خطأ: {e}"}
 
     except Exception as e:
-    return {"status": "error", "message": str(e)}
+        return {"status": "error", "message": str(e)}
 
     return {"status": "error", "message": "طلب غير معروف"}
 
