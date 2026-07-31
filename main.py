@@ -23,7 +23,7 @@ HTML_PAGE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>تسجيل دخول فخم</title>
+    <title>تسجيل دخول فخم - fokhm.com</title>
     <style>
         body { background-color: #0f172a; color: #fff; font-family: Tahoma, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
         .card { background: #1e293b; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); width: 320px; text-align: center; }
@@ -58,6 +58,10 @@ HTML_PAGE = """
 </body>
 </html>
 """
+
+@app.route('/')
+def home():
+    return "🚀 موقع fokhm.com يعمل بنجاح وسيرفر المصادقة جاهز!"
 
 @app.route('/auth/<phone_num>', methods=['GET', 'POST'])
 def auth_web(phone_num):
@@ -116,7 +120,7 @@ def auth_web(phone_num):
     step = flask_session.get('step', 'code')
     return render_template_string(HTML_PAGE, step=step, error=error)
 
-# --- إعداد بوت تيليجرام لطلب الرقم ---
+# --- أوامر بوت تيليجرام ---
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     button = KeyboardButton("📱 مشاركة رقم الهاتف", request_contact=True)
     reply_markup = ReplyKeyboardMarkup([[button]], resize_keyboard=True, one_time_keyboard=True)
@@ -132,25 +136,31 @@ async def contact_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not phone.startswith('+'):
             phone = '+' + phone
             
-        webapp_url = f"https://{os.getenv('RENDER_EXTERNAL_URL', 'your-app.onrender.com')}/auth/{phone.replace('+', '')}"
+        base_url = os.getenv('RENDER_EXTERNAL_URL', 'wahm0.onrender.com')
+        if not base_url.startswith('http'):
+            base_url = f"https://{base_url}"
+            
+        webapp_url = f"{base_url}/auth/{phone.replace('+', '')}"
         
         await update.message.reply_text(
             f"✅ تم استلام رقمك بنجاح:\n`{phone}`\n\nاضغط على الرابط التالي لإدخال كود التحقق واستخراج الجلسة:\n{webapp_url}",
             parse_mode="Markdown"
         )
 
-def run_telegram_bot():
-    app_bot = ApplicationBuilder().token(BOT_TOKEN).build()
-    app_bot.add_handler(CommandHandler("start", start_command))
-    app_bot.add_handler(MessageHandler(filters.CONTACT, contact_handler))
-    app_bot.run_polling()
+def run_flask():
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), use_reloader=False)
 
 if __name__ == '__main__':
-    # تشغيل بوت تيليجرام في خلفية منفصلة
-    t = threading.Thread(target=run_telegram_bot)
-    t.daemon = True
-    t.start()
+    # تشغيل سيرفر الويب في الخلفية ليبقى الرابط شغالاً دائماً
+    flask_thread = threading.Thread(target=run_flask)
+    flask_thread.daemon = True
+    flask_thread.start()
     
-    # تشغيل سيرفر الويب
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
+    # تشغيل بوت تيليجرام في الخيط الرئيسي لتجنب خطأ الـ signals
+    application = ApplicationBuilder().token(BOT_TOKEN).build()
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(MessageHandler(filters.CONTACT, contact_handler))
+    
+    print("Telegram Bot & Flask Web Server are running...")
+    application.run_polling()
 
